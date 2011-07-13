@@ -1122,14 +1122,14 @@ external_declaration
     { 
         if ($1 != NULL)
             for (unsigned int i = 0; i < $1->declarators.size(); ++i)
-                m->AddGlobal($1->declSpecs, $1->declarators[i], $1->declarators[i]->sym);
+                m->AddGlobal($1->declSpecs, $1->declarators[i], $1->declarators[i]->sym, $1->declarators[i]->pos, $1->declarators[i]->initExpr);
     }
     ;
 
 function_definition
     : declaration_specifiers declarator 
     {
-        m->AddGlobal($1, $2, $2->sym);
+        m->AddGlobal($1, $2, $2->sym, $2->pos, $2->initExpr);
         lAddFunctionParams($2); 
         lAddMaskToSymbolTable(@2);
         if ($1->typeQualifier & TYPEQUAL_TASK)

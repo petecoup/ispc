@@ -442,7 +442,7 @@ lInitFunSymDecl(DeclSpecs *ds, Declarator *decl) {
 
 
 void
-Module::AddGlobal(DeclSpecs *ds, Declarator *decl, Symbol *sym) {
+Module::AddGlobal(DeclSpecs *ds, Declarator *decl, Symbol *sym, SourcePos pos, Expr* initExpr) {
     // This function is called for a number of cases: function
     // declarations, typedefs, and global variables declarations /
     // definitions.  Figure out what we've got and take care of it.
@@ -467,7 +467,7 @@ Module::AddGlobal(DeclSpecs *ds, Declarator *decl, Symbol *sym) {
     else {
         // global variable
         if (m->symbolTable->LookupFunction(sym->name.c_str()) != NULL) {
-            Error(decl->pos, "Global variable \"%s\" shadows previously-declared function.",
+            Error(pos, "Global variable \"%s\" shadows previously-declared function.",
                   sym->name.c_str());
             return;
         }
@@ -482,7 +482,7 @@ Module::AddGlobal(DeclSpecs *ds, Declarator *decl, Symbol *sym) {
         }
 
         if (ds->storageClass == SC_EXTERN_C) {
-            Error(decl->pos, "extern \"C\" qualifier can only be used for functions.");
+            Error(pos, "extern \"C\" qualifier can only be used for functions.");
             return;
         }
 
@@ -496,23 +496,23 @@ Module::AddGlobal(DeclSpecs *ds, Declarator *decl, Symbol *sym) {
         llvm::Constant *llvmInitializer = NULL;
         if (ds->storageClass == SC_EXTERN || ds->storageClass == SC_EXTERN_C) {
             externGlobals.push_back(decl->sym);
-            if (decl->initExpr != NULL)
-                Error(decl->pos, "Initializer can't be provided with \"extern\" "
+            if (initExpr != NULL)
+                Error(pos, "Initializer can't be provided with \"extern\" "
                       "global variable \"%s\".", sym->name.c_str());
         }
         else {
-            if (decl->initExpr != NULL) {
-                decl->initExpr = decl->initExpr->TypeCheck();
-                if (decl->initExpr != NULL) {
+            if (initExpr != NULL) {
+                initExpr = initExpr->TypeCheck();
+                if (initExpr != NULL) {
                     // We need to make sure the initializer expression is
                     // the same type as the global
-                    decl->initExpr = decl->initExpr->TypeConv(decl->sym->type, "initializer");
+                    initExpr = initExpr->TypeConv(sym->type, "initializer");
 
-                    if (decl->initExpr != NULL) {
-                        decl->initExpr = decl->initExpr->Optimize();
+                    if (initExpr != NULL) {
+                        initExpr = initExpr->Optimize();
                         // Fingers crossed, now let's see if we've got a
                         // constant value..
-                        llvmInitializer = decl->initExpr->GetConstant(sym->type);
+                        llvmInitializer = initExpr->GetConstant(sym->type);
 
                         if (llvmInitializer != NULL) {
                             if (sym->type->IsConstType())
@@ -522,10 +522,10 @@ Module::AddGlobal(DeclSpecs *ds, Declarator *decl, Symbol *sym) {
                                 // StructTypes where a ConstExpr can't
                                 // represent their values.
                                 sym->constValue = 
-                                    dynamic_cast<ConstExpr *>(decl->initExpr);
+                                    dynamic_cast<ConstExpr *>(initExpr);
                         }
                         else
-                            Error(decl->pos, "Initializer for global variable \"%s\" "
+                            Error(pos, "Initializer for global variable \"%s\" "
                                   "must be a constant.", sym->name.c_str());
                     }
                 }
@@ -545,10 +545,10 @@ Module::AddGlobal(DeclSpecs *ds, Declarator *decl, Symbol *sym) {
 
 #ifndef LLVM_2_8
         if (diBuilder && (ds->storageClass != SC_EXTERN)) {
-            llvm::DIFile file = decl->pos.GetDIFile();
+            llvm::DIFile file = pos.GetDIFile();
             diBuilder->createGlobalVariable(sym->name, 
                                             file,
-                                            decl->pos.first_line,
+                                            pos.first_line,
                                             sym->type->GetDIType(file),
                                             (ds->storageClass == SC_STATIC),
                                             sym->storagePtr);
