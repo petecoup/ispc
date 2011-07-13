@@ -59,7 +59,7 @@ public:
 
     /** Adds the global variable described by the declaration information to
         the module. */
-    void AddGlobal(DeclSpecs *ds, Declarator *decl);
+    void AddGlobal(DeclSpecs *ds, Declarator *decl, Symbol *sym);
 
     /** Adds the function described by the declaration information and the
         provided statements to the module. */

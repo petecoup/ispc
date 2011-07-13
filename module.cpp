@@ -442,7 +442,7 @@ lInitFunSymDecl(DeclSpecs *ds, Declarator *decl) {
 
 
 void
-Module::AddGlobal(DeclSpecs *ds, Declarator *decl) {
+Module::AddGlobal(DeclSpecs *ds, Declarator *decl, Symbol *sym) {
     // This function is called for a number of cases: function
     // declarations, typedefs, and global variables declarations /
     // definitions.  Figure out what we've got and take care of it.
@@ -452,7 +452,7 @@ Module::AddGlobal(DeclSpecs *ds, Declarator *decl) {
         const Type *t = decl->GetType(ds);
         const FunctionType *ft = dynamic_cast<const FunctionType *>(t);
         assert(ft != NULL);
-        if (m->symbolTable->LookupFunction(decl->sym->name.c_str(), ft) != NULL)
+        if (m->symbolTable->LookupFunction(sym->name.c_str(), ft) != NULL)
             // Ignore redeclaration of a function with the same name and type
             return;
         // Otherwise do all of the llvm Module and SymbolTable work..
@@ -461,20 +461,20 @@ Module::AddGlobal(DeclSpecs *ds, Declarator *decl) {
     else if (ds->storageClass == SC_TYPEDEF) {
         // Typedefs are easy; just add the mapping between the given name
         // and the given type.
-        m->symbolTable->AddType(decl->sym->name.c_str(), decl->sym->type,
-                                decl->sym->pos);
+        m->symbolTable->AddType(sym->name.c_str(), sym->type,
+                                sym->pos);
     }
     else {
         // global variable
-        if (m->symbolTable->LookupFunction(decl->sym->name.c_str()) != NULL) {
+        if (m->symbolTable->LookupFunction(sym->name.c_str()) != NULL) {
             Error(decl->pos, "Global variable \"%s\" shadows previously-declared function.",
-                  decl->sym->name.c_str());
+                  sym->name.c_str());
             return;
         }
 
         // These may be NULL due to errors in parsing; just gracefully
         // return here if so.
-        if (!decl->sym || !decl->sym->type) {
+        if (!sym || !sym->type) {
             // But if these are NULL and there haven't been any previous
             // errors, something surprising is going on
             assert(errorCount > 0);
@@ -486,7 +486,7 @@ Module::AddGlobal(DeclSpecs *ds, Declarator *decl) {
             return;
         }
 
-        const llvm::Type *llvmType = decl->sym->type->LLVMType(g->ctx);
+        const llvm::Type *llvmType = sym->type->LLVMType(g->ctx);
         llvm::GlobalValue::LinkageTypes linkage =
             (ds->storageClass == SC_STATIC) ? llvm::GlobalValue::InternalLinkage :
                                               llvm::GlobalValue::ExternalLinkage;
@@ -498,7 +498,7 @@ Module::AddGlobal(DeclSpecs *ds, Declarator *decl) {
             externGlobals.push_back(decl->sym);
             if (decl->initExpr != NULL)
                 Error(decl->pos, "Initializer can't be provided with \"extern\" "
-                      "global variable \"%s\".", decl->sym->name.c_str());
+                      "global variable \"%s\".", sym->name.c_str());
         }
         else {
             if (decl->initExpr != NULL) {
@@ -512,21 +512,21 @@ Module::AddGlobal(DeclSpecs *ds, Declarator *decl) {
                         decl->initExpr = decl->initExpr->Optimize();
                         // Fingers crossed, now let's see if we've got a
                         // constant value..
-                        llvmInitializer = decl->initExpr->GetConstant(decl->sym->type);
+                        llvmInitializer = decl->initExpr->GetConstant(sym->type);
 
                         if (llvmInitializer != NULL) {
-                            if (decl->sym->type->IsConstType())
+                            if (sym->type->IsConstType())
                                 // Try to get a ConstExpr associated with
                                 // the symbol.  This dynamic_cast can
                                 // validly fail, for example for types like
                                 // StructTypes where a ConstExpr can't
                                 // represent their values.
-                                decl->sym->constValue = 
+                                sym->constValue = 
                                     dynamic_cast<ConstExpr *>(decl->initExpr);
                         }
                         else
                             Error(decl->pos, "Initializer for global variable \"%s\" "
-                                  "must be a constant.", decl->sym->name.c_str());
+                                  "must be a constant.", sym->name.c_str());
                     }
                 }
             }
@@ -538,20 +538,20 @@ Module::AddGlobal(DeclSpecs *ds, Declarator *decl) {
         }
 
         bool isConst = (ds->typeQualifier & TYPEQUAL_CONST) != 0;
-        decl->sym->storagePtr = new llvm::GlobalVariable(*module, llvmType, isConst, 
-                                                         linkage, llvmInitializer, 
-                                                         decl->sym->name.c_str());
-        m->symbolTable->AddVariable(decl->sym);
+        sym->storagePtr = new llvm::GlobalVariable(*module, llvmType, isConst, 
+                                                   linkage, llvmInitializer, 
+                                                   sym->name.c_str());
+        m->symbolTable->AddVariable(sym);
 
 #ifndef LLVM_2_8
         if (diBuilder && (ds->storageClass != SC_EXTERN)) {
             llvm::DIFile file = decl->pos.GetDIFile();
-            diBuilder->createGlobalVariable(decl->sym->name, 
+            diBuilder->createGlobalVariable(sym->name, 
                                             file,
                                             decl->pos.first_line,
-                                            decl->sym->type->GetDIType(file),
+                                            sym->type->GetDIType(file),
                                             (ds->storageClass == SC_STATIC),
-                                            decl->sym->storagePtr);
+                                            sym->storagePtr);
         }
 #endif // LLVM_2_8
     }
