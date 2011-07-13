@@ -260,14 +260,8 @@ lCheckForStructParameters(const FunctionType *ftype, SourcePos pos) {
     false if any errors were encountered.
  */
 static bool
-lInitFunSymDecl(DeclSpecs *ds, Declarator *decl) {
-    // Make sure that we've got what we expect here
-    Symbol *funSym = decl->sym;
-    assert(decl->isFunction);
-    assert(decl->arraySize.size() == 0);
-
-    // So far, so good.  Go ahead and set the type of the function symbol
-    funSym->type = decl->GetType(ds);
+lInitFunSymDecl(DeclSpecs *ds, Declarator *decl, StorageClass storageClass, Symbol *funSym, const Type* funType, SourcePos pos) {
+    funSym->type = funType;
 
     // If a global variable with the same name has already been declared
     // issue an error.
@@ -442,23 +436,21 @@ lInitFunSymDecl(DeclSpecs *ds, Declarator *decl) {
 
 
 void
-Module::AddGlobal(DeclSpecs *ds, Declarator *decl, Symbol *sym, SourcePos pos, Expr* initExpr) {
+Module::AddGlobal(DeclSpecs *ds, Declarator *decl, StorageClass storageClass, const Type *declType, Symbol *sym, SourcePos pos, Expr* initExpr) {
     // This function is called for a number of cases: function
     // declarations, typedefs, and global variables declarations /
     // definitions.  Figure out what we've got and take care of it.
 
-    if (decl->isFunction) {
-        // function declaration
-        const Type *t = decl->GetType(ds);
-        const FunctionType *ft = dynamic_cast<const FunctionType *>(t);
-        assert(ft != NULL);
+    const FunctionType *ft = dynamic_cast<const FunctionType *>(declType);
+
+    if (ft) {
         if (m->symbolTable->LookupFunction(sym->name.c_str(), ft) != NULL)
             // Ignore redeclaration of a function with the same name and type
             return;
         // Otherwise do all of the llvm Module and SymbolTable work..
-        lInitFunSymDecl(ds, decl);
+        lInitFunSymDecl(ds, decl, storageClass, sym, declType, pos);
     }
-    else if (ds->storageClass == SC_TYPEDEF) {
+    else if (storageClass == SC_TYPEDEF) {
         // Typedefs are easy; just add the mapping between the given name
         // and the given type.
         m->symbolTable->AddType(sym->name.c_str(), sym->type,
@@ -481,20 +473,20 @@ Module::AddGlobal(DeclSpecs *ds, Declarator *decl, Symbol *sym, SourcePos pos, E
             return;
         }
 
-        if (ds->storageClass == SC_EXTERN_C) {
+        if (storageClass == SC_EXTERN_C) {
             Error(pos, "extern \"C\" qualifier can only be used for functions.");
             return;
         }
 
         const llvm::Type *llvmType = sym->type->LLVMType(g->ctx);
         llvm::GlobalValue::LinkageTypes linkage =
-            (ds->storageClass == SC_STATIC) ? llvm::GlobalValue::InternalLinkage :
-                                              llvm::GlobalValue::ExternalLinkage;
+            (storageClass == SC_STATIC) ? llvm::GlobalValue::InternalLinkage :
+                                          llvm::GlobalValue::ExternalLinkage;
 
         // See if we have an initializer expression for the global.  If so,
         // make sure it's a compile-time constant!
         llvm::Constant *llvmInitializer = NULL;
-        if (ds->storageClass == SC_EXTERN || ds->storageClass == SC_EXTERN_C) {
+        if (storageClass == SC_EXTERN || storageClass == SC_EXTERN_C) {
             externGlobals.push_back(decl->sym);
             if (initExpr != NULL)
                 Error(pos, "Initializer can't be provided with \"extern\" "
@@ -550,7 +542,7 @@ Module::AddGlobal(DeclSpecs *ds, Declarator *decl, Symbol *sym, SourcePos pos, E
                                             file,
                                             pos.first_line,
                                             sym->type->GetDIType(file),
-                                            (ds->storageClass == SC_STATIC),
+                                            (storageClass == SC_STATIC),
                                             sym->storagePtr);
         }
 #endif // LLVM_2_8
