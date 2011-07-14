@@ -272,7 +272,7 @@ lInitFunSymDecl(DeclSpecs *ds, Declarator *decl, StorageClass storageClass, Symb
         return false;
     }
 
-    if (ds->storageClass == SC_EXTERN_C) {
+    if (storageClass == SC_EXTERN_C) {
         // Make sure the user hasn't supplied both an 'extern "C"' and a
         // 'task' qualifier with the function
         if (ds->typeQualifier & TYPEQUAL_TASK) {
@@ -281,7 +281,7 @@ lInitFunSymDecl(DeclSpecs *ds, Declarator *decl, StorageClass storageClass, Symb
             return false;
         }
         std::vector<Symbol *> *funcs;
-        funcs = m->symbolTable->LookupFunction(decl->sym->name.c_str());
+        funcs = m->symbolTable->LookupFunction(funSym->name.c_str());
         if (funcs != NULL) {
             if (funcs->size() > 1) {
                 // Multiple functions with this name have already been declared; 
@@ -310,16 +310,16 @@ lInitFunSymDecl(DeclSpecs *ds, Declarator *decl, StorageClass storageClass, Symb
     assert(functionType != NULL);
 
     // Get the LLVM FunctionType
-    bool includeMask = (ds->storageClass != SC_EXTERN_C);
+    bool includeMask = (storageClass != SC_EXTERN_C);
     const llvm::FunctionType *llvmFunctionType = 
         functionType->LLVMFunctionType(g->ctx, includeMask);
     if (llvmFunctionType == NULL)
         return false;
 
     // And create the llvm::Function
-    llvm::GlobalValue::LinkageTypes linkage = ds->storageClass == SC_STATIC ?
+    llvm::GlobalValue::LinkageTypes linkage = storageClass == SC_STATIC ?
         llvm::GlobalValue::InternalLinkage : llvm::GlobalValue::ExternalLinkage;
-    std::string functionName = ((ds->storageClass == SC_EXTERN_C) ?
+    std::string functionName = ((storageClass == SC_EXTERN_C) ?
                                 funSym->name : funSym->MangledName());
     llvm::Function *function = 
         llvm::Function::Create(llvmFunctionType, linkage, functionName.c_str(), m->module);
@@ -327,7 +327,7 @@ lInitFunSymDecl(DeclSpecs *ds, Declarator *decl, StorageClass storageClass, Symb
     // Set function attributes: we never throw exceptions, and want to
     // inline everything we can
     function->setDoesNotThrow(true);
-    if (!(ds->storageClass == SC_EXTERN_C) && !g->generateDebuggingSymbols &&
+    if (!(storageClass == SC_EXTERN_C) && !g->generateDebuggingSymbols &&
         (ds->typeQualifier & TYPEQUAL_INLINE))
         function->addFnAttr(llvm::Attribute::AlwaysInline);
     if (functionType->isTask)
@@ -336,8 +336,8 @@ lInitFunSymDecl(DeclSpecs *ds, Declarator *decl, StorageClass storageClass, Symb
 
     // Make sure that the return type isn't 'varying' if the function is
     // 'export'ed.
-    if (ds->storageClass == SC_EXPORT && lRecursiveCheckVarying(functionType->GetReturnType()))
-        Error(decl->pos, "Illegal to return a \"varying\" type from exported function \"%s\"",
+    if (storageClass == SC_EXPORT && lRecursiveCheckVarying(functionType->GetReturnType()))
+        Error(pos, "Illegal to return a \"varying\" type from exported function \"%s\"",
               funSym->name.c_str());
 
     if (functionType->isTask && (functionType->GetReturnType() != AtomicType::Void))
@@ -358,7 +358,7 @@ lInitFunSymDecl(DeclSpecs *ds, Declarator *decl, StorageClass storageClass, Symb
 
         // If the function is exported, make sure that the parameter
         // doesn't have any varying stuff going on in it.
-        if (ds->storageClass == SC_EXPORT)
+        if (storageClass == SC_EXPORT)
             lCheckForVaryingParameter(sym);
 
         // ISPC assumes that all memory passed in is aligned to the native
