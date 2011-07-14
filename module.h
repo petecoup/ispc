@@ -60,7 +60,7 @@ public:
 
     /** Adds the global variable described by the declaration information to
         the module. */
-    void AddGlobal(DeclSpecs *ds, Declarator *decl, StorageClass storageClass, const Type *declType, Symbol *sym, SourcePos pos, Expr* initExpr);
+    void AddGlobal(DeclSpecs *ds, Declarator *decl, int typeQualifier, StorageClass storageClass, const Type *declType, Symbol *sym, SourcePos pos, Expr* initExpr);
 
     /** Adds the function described by the declaration information and the
         provided statements to the module. */

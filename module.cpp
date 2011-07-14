@@ -260,7 +260,7 @@ lCheckForStructParameters(const FunctionType *ftype, SourcePos pos) {
     false if any errors were encountered.
  */
 static bool
-lInitFunSymDecl(DeclSpecs *ds, Declarator *decl, StorageClass storageClass, Symbol *funSym, const Type* funType, SourcePos pos) {
+lInitFunSymDecl(DeclSpecs *ds, Declarator *decl, int typeQualifier, StorageClass storageClass, Symbol *funSym, const Type* funType, SourcePos pos) {
     funSym->type = funType;
 
     // If a global variable with the same name has already been declared
@@ -275,7 +275,7 @@ lInitFunSymDecl(DeclSpecs *ds, Declarator *decl, StorageClass storageClass, Symb
     if (storageClass == SC_EXTERN_C) {
         // Make sure the user hasn't supplied both an 'extern "C"' and a
         // 'task' qualifier with the function
-        if (ds->typeQualifier & TYPEQUAL_TASK) {
+        if (typeQualifier & TYPEQUAL_TASK) {
             Error(funSym->pos, "\"task\" qualifier is illegal with C-linkage extern "
                   "function \"%s\".  Ignoring this function.", funSym->name.c_str());
             return false;
@@ -328,7 +328,7 @@ lInitFunSymDecl(DeclSpecs *ds, Declarator *decl, StorageClass storageClass, Symb
     // inline everything we can
     function->setDoesNotThrow(true);
     if (!(storageClass == SC_EXTERN_C) && !g->generateDebuggingSymbols &&
-        (ds->typeQualifier & TYPEQUAL_INLINE))
+        (typeQualifier & TYPEQUAL_INLINE))
         function->addFnAttr(llvm::Attribute::AlwaysInline);
     if (functionType->isTask)
         // This also applies transitively to members I think? 
@@ -436,7 +436,7 @@ lInitFunSymDecl(DeclSpecs *ds, Declarator *decl, StorageClass storageClass, Symb
 
 
 void
-Module::AddGlobal(DeclSpecs *ds, Declarator *decl, StorageClass storageClass, const Type *declType, Symbol *sym, SourcePos pos, Expr* initExpr) {
+Module::AddGlobal(DeclSpecs *ds, Declarator *decl, int typeQualifier, StorageClass storageClass, const Type *declType, Symbol *sym, SourcePos pos, Expr* initExpr) {
     // This function is called for a number of cases: function
     // declarations, typedefs, and global variables declarations /
     // definitions.  Figure out what we've got and take care of it.
@@ -448,7 +448,7 @@ Module::AddGlobal(DeclSpecs *ds, Declarator *decl, StorageClass storageClass, co
             // Ignore redeclaration of a function with the same name and type
             return;
         // Otherwise do all of the llvm Module and SymbolTable work..
-        lInitFunSymDecl(ds, decl, storageClass, sym, declType, pos);
+        lInitFunSymDecl(ds, decl, typeQualifier, storageClass, sym, declType, pos);
     }
     else if (storageClass == SC_TYPEDEF) {
         // Typedefs are easy; just add the mapping between the given name
@@ -529,7 +529,7 @@ Module::AddGlobal(DeclSpecs *ds, Declarator *decl, StorageClass storageClass, co
                 llvmInitializer = llvm::Constant::getNullValue(llvmType);
         }
 
-        bool isConst = (ds->typeQualifier & TYPEQUAL_CONST) != 0;
+        bool isConst = (typeQualifier & TYPEQUAL_CONST) != 0;
         sym->storagePtr = new llvm::GlobalVariable(*module, llvmType, isConst, 
                                                    linkage, llvmInitializer, 
                                                    sym->name.c_str());
