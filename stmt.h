@@ -40,6 +40,9 @@
 
 #include "ispc.h"
 
+class InitExpr;
+typedef std::pair<Symbol *, InitExpr*> SymbolInit;
+
 /** @brief Interface class for statements in the ispc language.
 
     This abstract base-class encapsulates methods that AST nodes for
@@ -86,7 +89,7 @@ private:
 class DeclStmt : public Stmt {
 public:
     DeclStmt(SourcePos pos, Declaration *declaration, SymbolTable *symbolTable);
-
+    
     void EmitCode(FunctionEmitContext *ctx) const;
     void Print(int indent) const;
 
@@ -94,6 +97,7 @@ public:
     Stmt *TypeCheck();
 
 private:
+    std::vector<SymbolInit> initSymbols;
     Declaration *declaration;
 };
 

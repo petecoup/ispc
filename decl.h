@@ -179,6 +179,9 @@ public:
     void Print() const;
 
     DeclSpecs *declSpecs;
+
+    std::vector<Symbol*> GetSymbols() const;
+
     std::vector<Declarator *> declarators;
 };
 

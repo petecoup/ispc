@@ -315,6 +315,17 @@ Declaration::Print() const {
     }
 }
 
+std::vector<Symbol*>
+Declaration::GetSymbols() const {
+    std::vector<Symbol*> symbols;
+
+    for (unsigned int i = 0; i < declarators.size(); ++i)
+        if (declarators[i])
+            symbols.push_back(declarators[i]->sym);
+
+    return symbols;
+}
+
 ///////////////////////////////////////////////////////////////////////////
 
 void

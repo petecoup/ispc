@@ -487,7 +487,7 @@ Module::AddGlobal(DeclSpecs *ds, Declarator *decl, int typeQualifier, StorageCla
         // make sure it's a compile-time constant!
         llvm::Constant *llvmInitializer = NULL;
         if (storageClass == SC_EXTERN || storageClass == SC_EXTERN_C) {
-            externGlobals.push_back(decl->sym);
+            externGlobals.push_back(sym);
             if (initExpr != NULL)
                 Error(pos, "Initializer can't be provided with \"extern\" "
                       "global variable \"%s\".", sym->name.c_str());
@@ -536,7 +536,7 @@ Module::AddGlobal(DeclSpecs *ds, Declarator *decl, int typeQualifier, StorageCla
         m->symbolTable->AddVariable(sym);
 
 #ifndef LLVM_2_8
-        if (diBuilder && (ds->storageClass != SC_EXTERN)) {
+        if (diBuilder && (storageClass != SC_EXTERN)) {
             llvm::DIFile file = pos.GetDIFile();
             diBuilder->createGlobalVariable(sym->name, 
                                             file,
