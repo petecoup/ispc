@@ -133,7 +133,7 @@ public:
     virtual std::string GetCDeclaration(const std::string &name) const = 0;
 
     /** Returns the LLVM type corresponding to this ispc type */
-    virtual const llvm::Type *LLVMType(llvm::LLVMContext *ctx) const = 0;
+    virtual LLVM_TYPE_CONST llvm::Type *LLVMType(llvm::LLVMContext *ctx) const = 0;
 
     /** Returns the DIType (LLVM's debugging information structure),
         corresponding to this type. */
@@ -202,10 +202,10 @@ public:
     std::string Mangle() const;
     std::string GetCDeclaration(const std::string &name) const;
 
-    const llvm::Type *LLVMType(llvm::LLVMContext *ctx) const;
+    LLVM_TYPE_CONST llvm::Type *LLVMType(llvm::LLVMContext *ctx) const;
     llvm::DIType GetDIType(llvm::DIDescriptor scope) const;
 
-    /** This enumerant records the basic types that AtomicTypes can be 
+    /** This enumerator records the basic types that AtomicTypes can be 
         built from.  */
     enum BasicType {
         TYPE_VOID,
@@ -240,6 +240,52 @@ private:
     const bool isUniform;
     const bool isConst;
     AtomicType(BasicType basicType, bool isUniform, bool isConst);
+};
+
+
+/** @brief Type implementation for enumerated types
+ */
+class EnumType : public Type {
+public:
+    /** Constructor for anonymous enumerated types */
+    EnumType(SourcePos pos);
+    /** Constructor for named enumerated types */
+    EnumType(const char *name, SourcePos pos);
+
+    bool IsUniformType() const;
+    bool IsBoolType() const;
+    bool IsFloatType() const;
+    bool IsIntType() const;
+    bool IsUnsignedType() const;
+    bool IsConstType() const;
+
+    const EnumType *GetBaseType() const;
+    const EnumType *GetAsVaryingType() const;
+    const EnumType *GetAsUniformType() const;
+    const Type *GetSOAType(int width) const;
+    const EnumType *GetAsConstType() const;
+    const EnumType *GetAsNonConstType() const;
+
+    std::string GetString() const;
+    std::string Mangle() const;
+    std::string GetCDeclaration(const std::string &name) const;
+
+    LLVM_TYPE_CONST llvm::Type *LLVMType(llvm::LLVMContext *ctx) const;
+    llvm::DIType GetDIType(llvm::DIDescriptor scope) const;
+
+    /** Provides the enumerators defined in the enum definition. */
+    void SetEnumerators(const std::vector<Symbol *> &enumerators);
+    /** Returns the total number of enuemrators in this enum type. */
+    int GetEnumeratorCount() const;
+    /** Returns the symbol for the given enumerator number. */
+    const Symbol *GetEnumerator(int i) const;
+
+    const SourcePos pos;
+
+private:
+    const std::string name;
+    bool isUniform, isConst;
+    std::vector<Symbol *> enumerators;
 };
 
 
@@ -323,7 +369,7 @@ public:
     std::string GetCDeclaration(const std::string &name) const;
 
     llvm::DIType GetDIType(llvm::DIDescriptor scope) const;
-    const llvm::ArrayType *LLVMType(llvm::LLVMContext *ctx) const;
+    LLVM_TYPE_CONST llvm::ArrayType *LLVMType(llvm::LLVMContext *ctx) const;
 
     /** This method returns the total number of elements in the array,
         including all dimensions if this is a multidimensional array. */
@@ -392,7 +438,7 @@ public:
 
     int TotalElementCount() const;
 
-    const llvm::ArrayType *LLVMType(llvm::LLVMContext *ctx) const;
+    LLVM_TYPE_CONST llvm::ArrayType *LLVMType(llvm::LLVMContext *ctx) const;
     llvm::DIType GetDIType(llvm::DIDescriptor scope) const;
 
     SOAArrayType *GetSizedArray(int size) const;
@@ -441,7 +487,7 @@ public:
     std::string Mangle() const;
     std::string GetCDeclaration(const std::string &name) const;
 
-    const llvm::Type *LLVMType(llvm::LLVMContext *ctx) const;
+    LLVM_TYPE_CONST llvm::Type *LLVMType(llvm::LLVMContext *ctx) const;
     llvm::DIType GetDIType(llvm::DIDescriptor scope) const;
 
     int GetElementCount() const;
@@ -487,7 +533,7 @@ public:
     std::string Mangle() const;
     std::string GetCDeclaration(const std::string &name) const;
 
-    const llvm::Type *LLVMType(llvm::LLVMContext *ctx) const;
+    LLVM_TYPE_CONST llvm::Type *LLVMType(llvm::LLVMContext *ctx) const;
     llvm::DIType GetDIType(llvm::DIDescriptor scope) const;
 
     /** Returns the type of the structure element with the given name (if any).
@@ -559,7 +605,7 @@ public:
     std::string Mangle() const;
     std::string GetCDeclaration(const std::string &name) const;
 
-    const llvm::Type *LLVMType(llvm::LLVMContext *ctx) const;
+    LLVM_TYPE_CONST llvm::Type *LLVMType(llvm::LLVMContext *ctx) const;
     llvm::DIType GetDIType(llvm::DIDescriptor scope) const;
 
 private:
@@ -605,7 +651,7 @@ public:
     std::string Mangle() const;
     std::string GetCDeclaration(const std::string &fname) const;
 
-    const llvm::Type *LLVMType(llvm::LLVMContext *ctx) const;
+    LLVM_TYPE_CONST llvm::Type *LLVMType(llvm::LLVMContext *ctx) const;
     llvm::DIType GetDIType(llvm::DIDescriptor scope) const;
 
     const Type *GetReturnType() const { return returnType; }
@@ -614,8 +660,8 @@ public:
         function type.  The \c includeMask parameter indicates whether the
         llvm::FunctionType should have a mask as the last argument in its
         function signature. */
-    const llvm::FunctionType *LLVMFunctionType(llvm::LLVMContext *ctx, 
-                                               bool includeMask = false) const;
+    LLVM_TYPE_CONST llvm::FunctionType *LLVMFunctionType(llvm::LLVMContext *ctx, 
+                                                         bool includeMask = false) const;
 
     const std::vector<const Type *> &GetArgumentTypes() const { return argTypes; }
     const std::vector<ConstExpr *> &GetArgumentDefaults() const { return argDefaults; }

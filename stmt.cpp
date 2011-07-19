@@ -133,7 +133,7 @@ lInitSymbol(llvm::Value *lvalue, const char *symName, const Type *type,
         // Initialize things without initializers to the undefined value.
         // To auto-initialize everything to zero, replace 'UndefValue' with
         // 'NullValue' in the below
-        const llvm::Type *ltype = type->LLVMType(g->ctx);
+        LLVM_TYPE_CONST llvm::Type *ltype = type->LLVMType(g->ctx);
         ctx->StoreInst(llvm::UndefValue::get(ltype), lvalue);
         return;
     }
@@ -152,13 +152,14 @@ lInitSymbol(llvm::Value *lvalue, const char *symName, const Type *type,
         }
     }
 
-    // Atomic types can't be initialized with { ... } initializer
+    // Atomic types and enums can't be initialized with { ... } initializer
     // expressions, so print an error and return if that's what we've got
     // here..
-    if (dynamic_cast<const AtomicType *>(type) != NULL) {
+    if (dynamic_cast<const AtomicType *>(type) != NULL ||
+        dynamic_cast<const EnumType *>(type) != NULL) {
         if (dynamic_cast<ExprList *>(initExpr) != NULL)
             Error(initExpr->pos, "Expression list initializers can't be used for "
-                  "variable \"%s\' with atomic type \"%s\".", symName,
+                  "variable \"%s\' with type \"%s\".", symName,
                   type->GetString().c_str());
         return;
     }
@@ -280,7 +281,7 @@ DeclStmt::EmitCode(FunctionEmitContext *ctx) const {
             continue;
         }
 
-        const llvm::Type *llvmType = type->LLVMType(g->ctx);
+        LLVM_TYPE_CONST llvm::Type *llvmType = type->LLVMType(g->ctx);
         assert(llvmType != NULL);
 
         if (declaration->declSpecs->storageClass == SC_STATIC) {
@@ -373,7 +374,8 @@ DeclStmt::TypeCheck() {
         // the int->float type conversion is in there and we don't return
         // an int as the constValue later...
         const Type *type = decl->sym->type;
-        if (dynamic_cast<const AtomicType *>(type) != NULL) {
+        if (dynamic_cast<const AtomicType *>(type) != NULL ||
+            dynamic_cast<const EnumType *>(type) != NULL) {
             // If it's an expr list with an atomic type, we'll later issue
             // an error.  Need to leave decl->initExpr as is in that case so it
             // is in fact caught later, though.
@@ -1412,7 +1414,7 @@ lProcessPrintArg(Expr *expr, FunctionEmitContext *ctx, std::string &argTypes) {
     else {
         argTypes.push_back(t);
 
-        const llvm::Type *llvmExprType = type->LLVMType(g->ctx);
+        LLVM_TYPE_CONST llvm::Type *llvmExprType = type->LLVMType(g->ctx);
         llvm::Value *ptr = ctx->AllocaInst(llvmExprType, "print_arg");
         llvm::Value *val = expr->GetValue(ctx);
         if (!val)
@@ -1458,7 +1460,7 @@ PrintStmt::EmitCode(FunctionEmitContext *ctx) const {
         int nArgs = elist ? elist->exprs.size() : 1;
 
         // Allocate space for the array of pointers to values to be printed 
-        const llvm::Type *argPtrArrayType = 
+        LLVM_TYPE_CONST llvm::Type *argPtrArrayType = 
             llvm::ArrayType::get(LLVMTypes::VoidPointerType, nArgs);
         llvm::Value *argPtrArray = ctx->AllocaInst(argPtrArrayType,
                                                    "print_arg_ptrs");

@@ -38,32 +38,32 @@
 #include "llvmutil.h"
 #include "type.h"
 
-const llvm::Type *LLVMTypes::VoidType = NULL;
-const llvm::PointerType *LLVMTypes::VoidPointerType = NULL;
-const llvm::Type *LLVMTypes::BoolType = NULL;
-const llvm::Type *LLVMTypes::Int8Type = NULL;
-const llvm::Type *LLVMTypes::Int16Type = NULL;
-const llvm::Type *LLVMTypes::Int32Type = NULL;
-const llvm::Type *LLVMTypes::Int32PointerType = NULL;
-const llvm::Type *LLVMTypes::Int64Type = NULL;
-const llvm::Type *LLVMTypes::Int64PointerType = NULL;
-const llvm::Type *LLVMTypes::FloatType = NULL;
-const llvm::Type *LLVMTypes::FloatPointerType = NULL;
-const llvm::Type *LLVMTypes::DoubleType = NULL;
-const llvm::Type *LLVMTypes::DoublePointerType = NULL;
+LLVM_TYPE_CONST llvm::Type *LLVMTypes::VoidType = NULL;
+LLVM_TYPE_CONST llvm::PointerType *LLVMTypes::VoidPointerType = NULL;
+LLVM_TYPE_CONST llvm::Type *LLVMTypes::BoolType = NULL;
+LLVM_TYPE_CONST llvm::Type *LLVMTypes::Int8Type = NULL;
+LLVM_TYPE_CONST llvm::Type *LLVMTypes::Int16Type = NULL;
+LLVM_TYPE_CONST llvm::Type *LLVMTypes::Int32Type = NULL;
+LLVM_TYPE_CONST llvm::Type *LLVMTypes::Int32PointerType = NULL;
+LLVM_TYPE_CONST llvm::Type *LLVMTypes::Int64Type = NULL;
+LLVM_TYPE_CONST llvm::Type *LLVMTypes::Int64PointerType = NULL;
+LLVM_TYPE_CONST llvm::Type *LLVMTypes::FloatType = NULL;
+LLVM_TYPE_CONST llvm::Type *LLVMTypes::FloatPointerType = NULL;
+LLVM_TYPE_CONST llvm::Type *LLVMTypes::DoubleType = NULL;
+LLVM_TYPE_CONST llvm::Type *LLVMTypes::DoublePointerType = NULL;
 
-const llvm::VectorType *LLVMTypes::MaskType = NULL;
-const llvm::VectorType *LLVMTypes::BoolVectorType = NULL;
-const llvm::VectorType *LLVMTypes::Int1VectorType = NULL;
-const llvm::VectorType *LLVMTypes::Int32VectorType = NULL;
-const llvm::Type *LLVMTypes::Int32VectorPointerType = NULL;
-const llvm::VectorType *LLVMTypes::Int64VectorType = NULL;
-const llvm::Type *LLVMTypes::Int64VectorPointerType = NULL;
-const llvm::VectorType *LLVMTypes::FloatVectorType = NULL;
-const llvm::Type *LLVMTypes::FloatVectorPointerType = NULL;
-const llvm::VectorType *LLVMTypes::DoubleVectorType = NULL;
-const llvm::Type *LLVMTypes::DoubleVectorPointerType = NULL;
-const llvm::ArrayType *LLVMTypes::VoidPointerVectorType = NULL;
+LLVM_TYPE_CONST llvm::VectorType *LLVMTypes::MaskType = NULL;
+LLVM_TYPE_CONST llvm::VectorType *LLVMTypes::BoolVectorType = NULL;
+LLVM_TYPE_CONST llvm::VectorType *LLVMTypes::Int1VectorType = NULL;
+LLVM_TYPE_CONST llvm::VectorType *LLVMTypes::Int32VectorType = NULL;
+LLVM_TYPE_CONST llvm::Type *LLVMTypes::Int32VectorPointerType = NULL;
+LLVM_TYPE_CONST llvm::VectorType *LLVMTypes::Int64VectorType = NULL;
+LLVM_TYPE_CONST llvm::Type *LLVMTypes::Int64VectorPointerType = NULL;
+LLVM_TYPE_CONST llvm::VectorType *LLVMTypes::FloatVectorType = NULL;
+LLVM_TYPE_CONST llvm::Type *LLVMTypes::FloatVectorPointerType = NULL;
+LLVM_TYPE_CONST llvm::VectorType *LLVMTypes::DoubleVectorType = NULL;
+LLVM_TYPE_CONST llvm::Type *LLVMTypes::DoubleVectorPointerType = NULL;
+LLVM_TYPE_CONST llvm::ArrayType *LLVMTypes::VoidPointerVectorType = NULL;
 
 llvm::Constant *LLVMTrue = NULL;
 llvm::Constant *LLVMFalse = NULL;
@@ -325,8 +325,8 @@ LLVMBoolVector(const bool *bvec) {
 }
 
 
-const llvm::ArrayType *
-LLVMPointerVectorType(const llvm::Type *t) {
+LLVM_TYPE_CONST llvm::ArrayType *
+LLVMPointerVectorType(LLVM_TYPE_CONST llvm::Type *t) {
     // NOTE: ArrayType, not VectorType
     return llvm::ArrayType::get(llvm::PointerType::get(t, 0), 
                                 g->target.vectorWidth);
