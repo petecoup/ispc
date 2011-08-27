@@ -119,6 +119,19 @@ static void svml_missing() {
     exit(1);
 }
 
+// On Windows, sin() is an overloaded function, so we need an unambiguous
+// function we can take the address of when wiring up the external references
+// below.
+
+double Sin(double x) { return sin(x); }
+double Cos(double x) { return cos(x); }
+double Tan(double x) { return tan(x); }
+double Atan(double x) { return atan(x); }
+double Atan2(double y, double x) { return atan2(y, x); }
+double Pow(double a, double b) { return pow(a, b); }
+double Exp(double x) { return exp(x); }
+double Log(double x) { return log(x); }
+
 static bool lRunTest(const char *fn) {
     llvm::LLVMContext *ctx = new llvm::LLVMContext;
 
@@ -158,38 +171,40 @@ static bool lRunTest(const char *fn) {
     }
 
     llvm::Function *func;
-    if ((func = module->getFunction("ISPCLaunch")) != NULL)
-        ee->addGlobalMapping(func, (void *)ISPCLaunch);
-    if ((func = module->getFunction("ISPCSync")) != NULL)
-        ee->addGlobalMapping(func, (void *)ISPCSync);
+#define DO_FUNC(FUNC ,FUNCNAME)                           \
+    if ((func = module->getFunction(FUNCNAME)) != NULL)   \
+        ee->addGlobalMapping(func, (void *)FUNC)
+    DO_FUNC(ISPCLaunch, "ISPCLaunch");
+    DO_FUNC(ISPCSync, "ISPCSync");
 #ifdef ISPC_IS_WINDOWS
-    if ((func = module->getFunction("ISPCMalloc")) != NULL)
-        ee->addGlobalMapping(func, (void *)ISPCMalloc);
-    if ((func = module->getFunction("ISPCFree")) != NULL)
-        ee->addGlobalMapping(func, (void *)ISPCFree);
+    DO_FUNC(ISPCMalloc, "ISPCMalloc");
+    DO_FUNC(ISPCFree, "ISPCFree");
 #endif // ISPC_IS_WINDOWS
-    if ((func = module->getFunction("putchar")) != NULL)
-        ee->addGlobalMapping(func, (void *)putchar);
-    if ((func = module->getFunction("printf")) != NULL)
-        ee->addGlobalMapping(func, (void *)printf);
-    if ((func = module->getFunction("fflush")) != NULL)
-        ee->addGlobalMapping(func, (void *)fflush);
-    if ((func = module->getFunction("sinf")) != NULL)
-        ee->addGlobalMapping(func, (void *)sinf);
-    if ((func = module->getFunction("cosf")) != NULL)
-        ee->addGlobalMapping(func, (void *)cosf);
-    if ((func = module->getFunction("tanf")) != NULL)
-        ee->addGlobalMapping(func, (void *)tanf);
-    if ((func = module->getFunction("atanf")) != NULL)
-        ee->addGlobalMapping(func, (void *)atanf);
-    if ((func = module->getFunction("atan2f")) != NULL)
-        ee->addGlobalMapping(func, (void *)atan2f);
-    if ((func = module->getFunction("powf")) != NULL)
-        ee->addGlobalMapping(func, (void *)powf);
-    if ((func = module->getFunction("expf")) != NULL)
-        ee->addGlobalMapping(func, (void *)expf);
-    if ((func = module->getFunction("logf")) != NULL)
-        ee->addGlobalMapping(func, (void *)logf);
+    DO_FUNC(putchar, "putchar");
+    DO_FUNC(printf, "printf");
+    DO_FUNC(fflush, "fflush");
+    DO_FUNC(sinf, "sinf");
+    DO_FUNC(cosf, "cosf");
+    DO_FUNC(tanf, "tanf");
+    DO_FUNC(atanf, "atanf");
+    DO_FUNC(atan2f, "atan2f");
+    DO_FUNC(powf, "powf");
+    DO_FUNC(expf, "expf");
+    DO_FUNC(logf, "logf");
+    DO_FUNC(Sin, "sin");
+    DO_FUNC(Cos, "cos");
+    DO_FUNC(Tan, "tan");
+    DO_FUNC(Atan, "atan");
+    DO_FUNC(Atan2, "atan2");
+    DO_FUNC(Pow, "pow");
+    DO_FUNC(Exp, "exp");
+    DO_FUNC(Log, "log");
+    DO_FUNC(memset, "memset");
+#ifdef ISPC_IS_APPLE
+    DO_FUNC(memset_pattern4, "memset_pattern4");
+    DO_FUNC(memset_pattern8, "memset_pattern8");
+    DO_FUNC(memset_pattern16, "memset_pattern16");
+#endif
 
 #ifdef ISPC_HAVE_SVML
 #define DO_SVML(FUNC ,FUNCNAME)                           \

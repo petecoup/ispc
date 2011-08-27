@@ -64,6 +64,7 @@ writePPM(int *buf, int width, int height, const char *fn) {
             fputc(c, fp);
     }
     fclose(fp);
+    printf("Wrote image file %s\n", fn);
 }
 
 
@@ -108,9 +109,6 @@ int main() {
     float y1 = 1;
 
     ensureTargetISAIsSupported();
-
-    extern void TasksInit();
-    TasksInit();
 
     int maxIterations = 512;
     int *buf = new int[width*height];

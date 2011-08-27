@@ -72,6 +72,7 @@ FLOAT_NUMBER (([0-9]+|(([0-9]+\.[0-9]*[fF]?)|(\.[0-9]+)))([eE][-+]?[0-9]+)?[fF]?
 HEX_FLOAT_NUMBER (0x[01](\.[0-9a-fA-F]*)?p[-+]?[0-9]+[fF]?)
 
 IDENT [a-zA-Z_][a-zA-Z_0-9]*
+ZO_SWIZZLE ([01]+[w-z]+)+|([01]+[rgba]+)+|([01]+[uv]+)+
 
 %%
 "/*"            { lCComment(yylloc); }
@@ -104,6 +105,8 @@ goto { return TOKEN_GOTO; }
 if { return TOKEN_IF; }
 inline { return TOKEN_INLINE; }
 int { return TOKEN_INT; }
+int8 { return TOKEN_INT8; }
+int16 { return TOKEN_INT16; }
 int32 { return TOKEN_INT; }
 int64 { return TOKEN_INT64; }
 launch { return TOKEN_LAUNCH; }

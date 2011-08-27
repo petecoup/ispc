@@ -91,7 +91,11 @@ static void usage(int ret) {
     printf("        disable-gather-scatter-flattening\tDisable flattening when all lanes are on\n");
     printf("        disable-uniform-memory-optimizations\tDisable uniform-based coherent memory access\n");
     printf("        disable-masked-store-optimizations\tDisable lowering to regular stores when possible\n");
+#if defined(LLVM_3_0) || defined(LLVM_3_0svn)
+    printf("    [--target={sse2,sse4,sse4x2,avx,avx-x2}] Select target ISA (SSE4 is default unless compiling for atom; then SSE2 is.)\n");
+#else
     printf("    [--target={sse2,sse4,sse4x2}] Select target ISA (SSE4 is default unless compiling for atom; then SSE2 is.)\n");
+#endif // LLVM 3.0
     printf("    [--version]\t\t\t\tPrint ispc version\n");
     printf("    [--woff]\t\t\t\tDisable warnings\n");
     printf("    [--wno-perf]\t\t\tDon't issue warnings related to performance-related issues\n");
@@ -118,13 +122,18 @@ static void lDoTarget(const char *target) {
         g->target.nativeVectorWidth = 4;
         g->target.vectorWidth = 8;
     }
-#if 0
+#if defined(LLVM_3_0) || defined(LLVM_3_0svn)
     else if (!strcasecmp(target, "avx")) {
         g->target.isa = Target::AVX;
         g->target.nativeVectorWidth = 8;
         g->target.vectorWidth = 8;
     }
-#endif
+    else if (!strcasecmp(target, "avx-x2")) {
+        g->target.isa = Target::AVX;
+        g->target.nativeVectorWidth = 8;
+        g->target.vectorWidth = 16;
+    }
+#endif // LLVM 3.0
     else
         usage(1);
 }
@@ -205,8 +214,13 @@ int main(int Argc, char *Argv[]) {
             g->cppArgs.push_back(argv[i]);
         }
 #endif // !ISPC_IS_WINDOWS
-        else if (!strncmp(argv[i], "--arch=", 7))
+        else if (!strncmp(argv[i], "--arch=", 7)) {
             g->target.arch = argv[i] + 7;
+            if (g->target.arch == "x86")
+                g->target.is32bit = true;
+            else if (g->target.arch == "x86-64")
+                g->target.is32bit = false;
+        }
         else if (!strncmp(argv[i], "--cpu=", 6))
             g->target.cpu = argv[i] + 6;
         else if (!strcmp(argv[i], "--fast-math"))

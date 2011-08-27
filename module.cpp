@@ -76,7 +76,9 @@
 #include <llvm/Target/TargetSelect.h>
 #include <llvm/Target/TargetOptions.h>
 #include <llvm/Target/TargetData.h>
+#if !defined(LLVM_3_0) && !defined(LLVM_3_0svn)
 #include <llvm/Target/SubtargetFeature.h>
+#endif // !LLVM_3_0
 #include <llvm/PassManager.h>
 #include <llvm/Analysis/Verifier.h>
 #include <llvm/Support/CFG.h>
@@ -107,6 +109,43 @@ Module::Module(const char *fn) {
     symbolTable = new SymbolTable;
     module = new llvm::Module(filename ? filename : "<stdin>", *g->ctx);
 
+    // initialize target in module
+    llvm::InitializeAllTargets();
+
+    llvm::Triple triple;
+    // Start with the host triple as the default
+    triple.setTriple(llvm::sys::getHostTriple());
+    if (g->target.arch != "") {
+        // If the user specified a target architecture, see if it's a known
+        // one; print an error with the valid ones otherwise.
+        const llvm::Target *target = NULL;
+        for (llvm::TargetRegistry::iterator iter = llvm::TargetRegistry::begin();
+             iter != llvm::TargetRegistry::end(); ++iter) {
+            if (g->target.arch == iter->getName()) {
+                target = &*iter;
+                break;
+            }
+        }
+        if (!target) {
+            fprintf(stderr, "Invalid target \"%s\"\nOptions: ", 
+                    g->target.arch.c_str());
+            llvm::TargetRegistry::iterator iter;
+            for (iter = llvm::TargetRegistry::begin();
+                 iter != llvm::TargetRegistry::end(); ++iter)
+                fprintf(stderr, "%s ", iter->getName());
+            fprintf(stderr, "\n");
+            exit(1);
+        }
+
+        // And override the arch in the host triple
+        llvm::Triple::ArchType archType = 
+            llvm::Triple::getArchTypeForLLVMName(g->target.arch);
+        if (archType != llvm::Triple::UnknownArch)
+            triple.setArch(archType);
+    }
+    module->setTargetTriple(triple.str());
+
+
 #ifndef LLVM_2_8
     if (g->generateDebuggingSymbols)
         diBuilder = new llvm::DIBuilder(*module);
@@ -118,16 +157,27 @@ Module::Module(const char *fn) {
     // If we're generating debugging symbols, let the DIBuilder know that
     // we're starting a new compilation unit.
     if (diBuilder != NULL) {
-        std::string directory, name;
-        GetDirectoryAndFileName(g->currentDirectory, filename, &directory,
-                                &name);
-        diBuilder->createCompileUnit(llvm::dwarf::DW_LANG_C99,  /* lang */
-                                     name,  /* filename */
-                                     directory, /* directory */
-                                     "ispc", /* producer */
-                                     g->opt.level > 0 /* is optimized */,
-                                     "-g", /* command line args */
-                                     0 /* run time version */);
+        if (filename == NULL) {
+            // Unfortunately we can't yet call Error() since the global 'm'
+            // variable hasn't been initialized yet.
+            fprintf(stderr, "Can't emit debugging information with no "
+                    "source file on disk.\n");
+            ++errorCount;
+            delete diBuilder;
+            diBuilder = NULL;
+        }
+        else {
+            std::string directory, name;
+            GetDirectoryAndFileName(g->currentDirectory, filename, &directory,
+                                    &name);
+            diBuilder->createCompileUnit(llvm::dwarf::DW_LANG_C99,  /* lang */
+                                         name,  /* filename */
+                                         directory, /* directory */
+                                         "ispc", /* producer */
+                                         g->opt.level > 0 /* is optimized */,
+                                         "-g", /* command line args */
+                                         0 /* run time version */);
+        }
     }
 #endif // LLVM_2_8
 }
@@ -505,8 +555,12 @@ Module::AddGlobal(DeclSpecs *ds, Declarator *decl) {
                 decl->initExpr = decl->initExpr->TypeCheck();
                 if (decl->initExpr != NULL) {
                     // We need to make sure the initializer expression is
-                    // the same type as the global
-                    decl->initExpr = decl->initExpr->TypeConv(decl->sym->type, "initializer");
+                    // the same type as the global.  (But not if it's an
+                    // ExprList; they don't have types per se / can't type
+                    // convert themselves anyway.)
+                    if (dynamic_cast<ExprList *>(decl->initExpr) == NULL)
+                        decl->initExpr = 
+                            decl->initExpr->TypeConv(decl->sym->type, "initializer");
 
                     if (decl->initExpr != NULL) {
                         decl->initExpr = decl->initExpr->Optimize();
@@ -591,6 +645,7 @@ lCopyInTaskParameter(int i, llvm::Value *structArgPtr, Declarator *decl,
     // memory
     llvm::Value *ptrval = ctx->LoadInst(ptr, NULL, sym->name.c_str());
     ctx->StoreInst(ptrval, sym->storagePtr);
+    ctx->EmitFunctionParameterDebugInfo(sym);
 }
 
 
@@ -783,13 +838,14 @@ Module::AddFunction(DeclSpecs *ds, Declarator *decl, Stmt *code) {
     }
 
     if (errorCount == 0) {
-        if (g->debugPrint) {
-            llvm::PassManager ppm;
-            ppm.add(llvm::createPrintModulePass(&llvm::outs()));
-            ppm.run(*module);
+        if (llvm::verifyFunction(*function, llvm::ReturnStatusAction) == true) {
+            if (g->debugPrint) {
+                llvm::PassManager ppm;
+                ppm.add(llvm::createPrintModulePass(&llvm::outs()));
+                ppm.run(*module);
+            }
+            FATAL("Function verificication failed");
         }
-
-        llvm::verifyFunction(*function);
 
         // If the function is 'export'-qualified, emit a second version of
         // it without a mask parameter and without name mangling so that
@@ -813,8 +869,17 @@ Module::AddFunction(DeclSpecs *ds, Declarator *decl, Stmt *code) {
                     FunctionEmitContext ec(functionType->GetReturnType(), appFunction, funSym,
                                            firstStmtPos);
                     lEmitFunctionCode(&ec, appFunction, functionType, funSym, decl, code);
-                    if (errorCount == 0)
-                        llvm::verifyFunction(*appFunction);
+                    if (errorCount == 0) {
+                        if (llvm::verifyFunction(*appFunction, 
+                                                 llvm::ReturnStatusAction) == true) {
+                            if (g->debugPrint) {
+                                llvm::PassManager ppm;
+                                ppm.add(llvm::createPrintModulePass(&llvm::outs()));
+                                ppm.run(*module);
+                            }
+                            FATAL("Function verificication failed");
+                        }
+                    }
                 }
             }
         }
@@ -824,6 +889,11 @@ Module::AddFunction(DeclSpecs *ds, Declarator *decl, Stmt *code) {
 
 bool
 Module::WriteOutput(OutputType outputType, const char *outFileName) {
+#if defined(LLVM_3_0) || defined(LLVM_3_0svn)
+    if (diBuilder != NULL && outputType != Header)
+        diBuilder->finalize();
+#endif // LLVM_3_0
+
     // First, issue a warning if the output file suffix and the type of
     // file being created seem to mismatch.  This can help catch missing
     // command-line arguments specifying the output file type.
@@ -897,62 +967,27 @@ Module::WriteOutput(OutputType outputType, const char *outFileName) {
 
 bool
 Module::writeObjectFileOrAssembly(OutputType outputType, const char *outFileName) {
-    llvm::InitializeAllTargets();
 #if defined(LLVM_3_0) || defined(LLVM_3_0svn)
-    llvm::InitializeAllMCAsmInfos();
-    llvm::InitializeAllMCSubtargetInfos();
+    llvm::InitializeAllTargetMCs();
 #endif
     llvm::InitializeAllAsmPrinters();
     llvm::InitializeAllAsmParsers();
 
     llvm::Triple triple(module->getTargetTriple());
-    if (triple.getTriple().empty())
-        triple.setTriple(llvm::sys::getHostTriple());
+    assert(triple.getTriple().empty() == false);
 
     const llvm::Target *target = NULL;
-    if (g->target.arch != "") {
-        // If the user specified a target architecture, see if it's a known
-        // one; print an error with the valid ones otherwise.
-        for (llvm::TargetRegistry::iterator iter = llvm::TargetRegistry::begin();
-             iter != llvm::TargetRegistry::end(); ++iter) {
-            if (g->target.arch == iter->getName()) {
-                target = &*iter;
-                break;
-            }
-        }
-        if (!target) {
-            fprintf(stderr, "Invalid target \"%s\"\nOptions: ", 
-                    g->target.arch.c_str());
-            llvm::TargetRegistry::iterator iter;
-            for (iter = llvm::TargetRegistry::begin();
-                 iter != llvm::TargetRegistry::end(); ++iter)
-                fprintf(stderr, "%s ", iter->getName());
-            fprintf(stderr, "\n");
-            return false;
-        }
-
-        llvm::Triple::ArchType archType = 
-            llvm::Triple::getArchTypeForLLVMName(g->target.arch);
-        if (archType != llvm::Triple::UnknownArch)
-            triple.setArch(archType);
-    }
-    else {
-        // Otherwise get the target either based on the host or the
-        // module's target, if it has been set there.
-        std::string error;
-        target = llvm::TargetRegistry::lookupTarget(triple.getTriple(), error);
-        if (!target) {
-            fprintf(stderr, "Unable to select target for module: %s\n", 
-                    error.c_str());
-            return false;
-        }
-    }
+    std::string error;
+    target = llvm::TargetRegistry::lookupTarget(triple.getTriple(), error);
+    assert(target != NULL);
 
     std::string featuresString;
+    llvm::TargetMachine *targetMachine = NULL;
 #if defined LLVM_3_0svn || defined LLVM_3_0
-    llvm::TargetMachine *targetMachine = 
-        target->createTargetMachine(triple.getTriple(), g->target.cpu,
-                                    featuresString);
+    if (g->target.isa == Target::AVX)
+        featuresString = "+avx";
+    targetMachine = target->createTargetMachine(triple.getTriple(), g->target.cpu,
+                                                featuresString);
 #else
     if (g->target.cpu.size()) {
         llvm::SubtargetFeatures features;
@@ -960,8 +995,8 @@ Module::writeObjectFileOrAssembly(OutputType outputType, const char *outFileName
         featuresString = features.getString();
     }
 
-    llvm::TargetMachine *targetMachine = 
-        target->createTargetMachine(triple.getTriple(), featuresString);
+    targetMachine = target->createTargetMachine(triple.getTriple(), 
+                                                featuresString);
 #endif
     if (targetMachine == NULL) {
         fprintf(stderr, "Unable to create target machine for target \"%s\"!",
@@ -977,7 +1012,6 @@ Module::writeObjectFileOrAssembly(OutputType outputType, const char *outFileName
     bool binary = (fileType == llvm::TargetMachine::CGFT_ObjectFile);
     unsigned int flags = binary ? llvm::raw_fd_ostream::F_Binary : 0;
 
-    std::string error;
     llvm::tool_output_file *of = new llvm::tool_output_file(outFileName, error, flags);
     if (error.size()) {
         fprintf(stderr, "Error opening output file \"%s\".\n", outFileName);

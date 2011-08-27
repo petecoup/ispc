@@ -12,10 +12,11 @@ CLANG_LIBS = -lclangFrontend -lclangDriver \
 
 LLVM_LIBS=$(shell llvm-config --ldflags --libs) -lpthread -ldl
 LLVM_CXXFLAGS=$(shell llvm-config --cppflags)
-LLVM_VERSION_DEF=-DLLVM_$(shell llvm-config --version | sed s/\\./_/)
+LLVM_VERSION=$(shell llvm-config --version | sed s/\\./_/)
+LLVM_VERSION_DEF=-DLLVM_$(LLVM_VERSION)
 
 BUILD_DATE=$(shell date +%Y%m%d)
-BUILD_VERSION=$(shell git log | head -1)
+BUILD_VERSION=$(shell git log --abbrev-commit --abbrev=16 | head -1)
 
 CXX=g++
 CPP=cpp
@@ -43,17 +44,19 @@ CXX_SRC=builtins.cpp ctx.cpp decl.cpp expr.cpp ispc.cpp \
 	util.cpp
 HEADERS=builtins.h ctx.h decl.h expr.h ispc.h llvmutil.h module.h \
 	opt.h stmt.h sym.h type.h util.h
-STDLIB_SRC=stdlib-avx.ll stdlib-sse2.ll stdlib-sse4.ll stdlib-sse4x2.ll
+BUILTINS_SRC=builtins-avx.ll builtins-avx-x2.ll builtins-sse2.ll \
+	builtins-sse4.ll builtins-sse4x2.ll
 BISON_SRC=parse.yy
 FLEX_SRC=lex.ll
 
-OBJS=$(addprefix objs/, $(CXX_SRC:.cpp=.o) $(STDLIB_SRC:.ll=.o) stdlib-c.o stdlib_ispc.o \
-	$(BISON_SRC:.yy=.o) $(FLEX_SRC:.ll=.o))
+OBJS=$(addprefix objs/, $(CXX_SRC:.cpp=.o) $(BUILTINS_SRC:.ll=.o) \
+	builtins-c-32.o builtins-c-64.o stdlib_ispc.o $(BISON_SRC:.yy=.o) \
+	$(FLEX_SRC:.ll=.o))
 
 default: ispc ispc_test
 
 .PHONY: dirs clean depend doxygen print_llvm_src
-.PRECIOUS: objs/stdlib-%.cpp
+.PRECIOUS: objs/builtins-%.cpp
 
 depend: $(CXX_SRC) $(HEADERS)
 	@echo Updating dependencies
@@ -103,19 +106,27 @@ objs/lex.o: objs/lex.cpp $(HEADERS) objs/parse.cc
 	@echo Compiling $<
 	@$(CXX) $(CXXFLAGS) -o $@ -c $<
 
-objs/stdlib-%.cpp: stdlib-%.ll stdlib.m4 stdlib-sse.ll
-	@echo Creating C++ source from stdlib file $<
-	@m4 stdlib.m4 $< | ./bitcode2cpp.py $< > $@
+objs/builtins-%.cpp: builtins-%.ll builtins.m4 builtins-sse.ll builtins-avx-common.ll
+	@echo Creating C++ source from builtin definitions file $<
+	@m4 -DLLVM_VERSION=$(LLVM_VERSION) builtins.m4 $< | ./bitcode2cpp.py $< > $@
 
-objs/stdlib-%.o: objs/stdlib-%.cpp
+objs/builtins-%.o: objs/builtins-%.cpp
 	@echo Compiling $<
 	@$(CXX) $(CXXFLAGS) -o $@ -c $<
 
-objs/stdlib-c.cpp: stdlib-c.c
-	@echo Creating C++ source from stdlib file $<
-	@$(CLANG) -I /opt/l1om/usr/include/ -emit-llvm -c $< -o - | llvm-dis - | ./bitcode2cpp.py $< > $@
+objs/builtins-c-32.cpp: builtins-c.c
+	@echo Creating C++ source from builtins definition file $<
+	@$(CLANG) -m32 -emit-llvm -c $< -o - | llvm-dis - | ./bitcode2cpp.py builtins-c-32.c > $@
 
-objs/stdlib-c.o: objs/stdlib-c.cpp
+objs/builtins-c-32.o: objs/builtins-c-32.cpp
+	@echo Compiling $<
+	@$(CXX) $(CXXFLAGS) -o $@ -c $<
+
+objs/builtins-c-64.cpp: builtins-c.c
+	@echo Creating C++ source from builtins definition file $<
+	@$(CLANG) -m64 -emit-llvm -c $< -o - | llvm-dis - | ./bitcode2cpp.py builtins-c-64.c > $@
+
+objs/builtins-c-64.o: objs/builtins-c-64.cpp
 	@echo Compiling $<
 	@$(CXX) $(CXXFLAGS) -o $@ -c $<
 

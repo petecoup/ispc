@@ -42,6 +42,7 @@
 #include <math.h>
 #include <algorithm>
 #include <assert.h>
+#include <string.h>
 #include <sys/types.h>
 #include "../timing.h"
 #include "../cpuid.h"
@@ -90,6 +91,7 @@ static void writeImage(int *idImage, float *depthImage, int width, int height,
         }
     }            
     fclose(f);
+    printf("Wrote image file %s\n", filename);
 }
 
 
@@ -190,7 +192,9 @@ int main(int argc, char *argv[]) {
         nodes[i].bounds[1].v[1] = b[4];
         nodes[i].bounds[1].v[2] = b[5];
         READ(nodes[i].offset, 1);
-        READ(nodes[i].primsAxis, 1);
+        READ(nodes[i].nPrimitives, 1);
+        READ(nodes[i].splitAxis, 1);
+        READ(nodes[i].pad, 1);
     }
 
     // And then read the triangles 
@@ -212,7 +216,7 @@ int main(int argc, char *argv[]) {
     }
     fclose(f);
 
-    // round image resolution up to multiple of 4 to makethings easy for
+    // round image resolution up to multiple of 4 to make things easy for
     // the code that assigns pixels to ispc program instances
     height = (height + 3) & ~3;
     width = (width + 3) & ~3;
@@ -223,19 +227,42 @@ int main(int argc, char *argv[]) {
     float *image = new float[width*height];
 
     //
-    // Run 3 iterations with ispc, record the minimum time
+    // Run 3 iterations with ispc + 1 core, record the minimum time
     //
     double minTimeISPC = 1e30;
     for (int i = 0; i < 3; ++i) {
         reset_and_start_timer();
-        raytrace(width, height, raster2camera, camera2world, 
-                 image, id, nodes, triangles);
+        raytrace_ispc(width, height, raster2camera, camera2world, 
+                      image, id, nodes, triangles);
         double dt = get_elapsed_mcycles();
         minTimeISPC = std::min(dt, minTimeISPC);
     }
-    printf("[rt ispc]:\t\t\t[%.3f] million cycles for %d x %d image\n", minTimeISPC, width, height);
+    printf("[rt ispc, 1 core]:\t\t[%.3f] million cycles for %d x %d image\n", 
+           minTimeISPC, width, height);
 
-    writeImage(id, image, width, height, "rt-ispc.ppm");
+    writeImage(id, image, width, height, "rt-ispc-1core.ppm");
+
+    memset(id, 0, width*height*sizeof(int));
+    memset(image, 0, width*height*sizeof(float));
+
+    //
+    // Run 3 iterations with ispc + 1 core, record the minimum time
+    //
+    double minTimeISPCtasks = 1e30;
+    for (int i = 0; i < 3; ++i) {
+        reset_and_start_timer();
+        raytrace_ispc_tasks(width, height, raster2camera, camera2world, 
+                            image, id, nodes, triangles);
+        double dt = get_elapsed_mcycles();
+        minTimeISPCtasks = std::min(dt, minTimeISPCtasks);
+    }
+    printf("[rt ispc + tasks]:\t\t[%.3f] million cycles for %d x %d image\n", 
+           minTimeISPCtasks, width, height);
+
+    writeImage(id, image, width, height, "rt-ispc-tasks.ppm");
+
+    memset(id, 0, width*height*sizeof(int));
+    memset(image, 0, width*height*sizeof(float));
 
     //
     // And 3 iterations with the serial implementation, reporting the
@@ -251,7 +278,8 @@ int main(int argc, char *argv[]) {
     }
     printf("[rt serial]:\t\t\t[%.3f] million cycles for %d x %d image\n", 
            minTimeSerial, width, height);
-    printf("\t\t\t\t(%.2fx speedup from ISPC)\n", minTimeSerial / minTimeISPC);
+    printf("\t\t\t\t(%.2fx speedup from ISPC, %.2f from ISPC + tasks)\n", 
+           minTimeSerial / minTimeISPC, minTimeSerial / minTimeISPCtasks);
 
     writeImage(id, image, width, height, "rt-serial.ppm");
 

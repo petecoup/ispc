@@ -765,8 +765,14 @@ FunctionEmitContext::EmitMalloc(LLVM_TYPE_CONST llvm::Type *ty, int align) {
     LLVM_TYPE_CONST llvm::Type *ptrType = llvm::PointerType::get(ty, 0);
     llvm::Value *nullPtr = llvm::Constant::getNullValue(ptrType);
     llvm::Value *index[1] = { LLVMInt32(1) };
+#if defined(LLVM_3_0) || defined(LLVM_3_0svn)
+    llvm::ArrayRef<llvm::Value *> arrayRef(&index[0], &index[1]);
+    llvm::Value *poffset = llvm::GetElementPtrInst::Create(nullPtr, arrayRef,
+                                                           "offset_ptr", bblock);
+#else
     llvm::Value *poffset = llvm::GetElementPtrInst::Create(nullPtr, &index[0], &index[1],
                                                            "offset_ptr", bblock);
+#endif
     AddDebugPos(poffset);
     llvm::Value *sizeOf = PtrToIntInst(poffset, LLVMTypes::Int64Type, "offset_int");
 
@@ -798,8 +804,13 @@ lGetStringAsValue(llvm::BasicBlock *bblock, const char *s) {
                                                  llvm::GlobalValue::InternalLinkage,
                                                  sConstant, s);
     llvm::Value *indices[2] = { LLVMInt32(0), LLVMInt32(0) };
+#if defined(LLVM_3_0) || defined(LLVM_3_0svn)
+    llvm::ArrayRef<llvm::Value *> arrayRef(&indices[0], &indices[2]);
+    return llvm::GetElementPtrInst::Create(sPtr, arrayRef, "sptr", bblock);
+#else
     return llvm::GetElementPtrInst::Create(sPtr, &indices[0], &indices[2],
                                            "sptr", bblock);
+#endif
 }
 
 
@@ -1289,9 +1300,16 @@ FunctionEmitContext::GetElementPtrInst(llvm::Value *basePtr, llvm::Value *index0
         // The easy case: both the base pointer and the indices are
         // uniform, so just emit the regular LLVM GEP instruction
         llvm::Value *indices[2] = { index0, index1 };
+#if defined(LLVM_3_0) || defined(LLVM_3_0svn)
+        llvm::ArrayRef<llvm::Value *> arrayRef(&indices[0], &indices[2]);
+        llvm::Instruction *inst = 
+            llvm::GetElementPtrInst::Create(basePtr, arrayRef,
+                                            name ? name : "gep", bblock);
+#else
         llvm::Instruction *inst = 
             llvm::GetElementPtrInst::Create(basePtr, &indices[0], &indices[2], 
                                             name ? name : "gep", bblock);
+#endif
         AddDebugPos(inst);
         return inst;
     }
@@ -1448,17 +1466,20 @@ FunctionEmitContext::gather(llvm::Value *lvalue, const Type *type,
     llvm::Value *mask = GetMask();
     llvm::Function *gather = NULL;
     // Figure out which gather function to call based on the size of
-    // the elements; will need to generalize this for 8 and 16-bit
-    // types.
+    // the elements.
     if (retType == LLVMTypes::DoubleVectorType || 
         retType == LLVMTypes::Int64VectorType)
         gather = m->module->getFunction("__pseudo_gather_64");
-    else {
-        assert(retType == LLVMTypes::FloatVectorType || 
-               retType == LLVMTypes::Int32VectorType);
+    else if (retType == LLVMTypes::FloatVectorType || 
+             retType == LLVMTypes::Int32VectorType)
         gather = m->module->getFunction("__pseudo_gather_32");
+    else if (retType == LLVMTypes::Int16VectorType)
+        gather = m->module->getFunction("__pseudo_gather_16");
+    else {
+        assert(retType == LLVMTypes::Int8VectorType);
+        gather = m->module->getFunction("__pseudo_gather_8");
     }
-    assert(gather);
+    assert(gather != NULL);
 
     llvm::Value *voidlvalue = BitCastInst(lvalue, LLVMTypes::VoidPointerType);
     llvm::Instruction *call = CallInst(gather, voidlvalue, mask, name);
@@ -1578,9 +1599,7 @@ FunctionEmitContext::maskedStore(llvm::Value *rvalue, llvm::Value *lvalue,
     rvalueType = rvalueType->GetAsNonConstType();
 
     llvm::Function *maskedStoreFunc = NULL;
-    // Figure out if we need a 32-bit or 64-bit masked store.  This
-    // will need to be generalized when/if 8 and 16-bit data types are
-    // added.
+    // Figure out if we need a 8, 16, 32 or 64-bit masked store.
     if (rvalueType == AtomicType::VaryingDouble || 
         rvalueType == AtomicType::VaryingInt64 ||
         rvalueType == AtomicType::VaryingUInt64) {
@@ -1590,19 +1609,29 @@ FunctionEmitContext::maskedStore(llvm::Value *rvalue, llvm::Value *lvalue,
         rvalue = BitCastInst(rvalue, LLVMTypes::Int64VectorType, 
                              "rvalue_to_int64");
     }
-    else {
-        assert(rvalueType == AtomicType::VaryingFloat ||
-               rvalueType == AtomicType::VaryingBool ||
-               rvalueType == AtomicType::VaryingInt32 ||
-               rvalueType == AtomicType::VaryingUInt32 ||
-               dynamic_cast<const EnumType *>(rvalueType) != NULL);
-
+    else if (rvalueType == AtomicType::VaryingFloat ||
+             rvalueType == AtomicType::VaryingBool ||
+             rvalueType == AtomicType::VaryingInt32 ||
+             rvalueType == AtomicType::VaryingUInt32 ||
+             dynamic_cast<const EnumType *>(rvalueType) != NULL) {
         maskedStoreFunc = m->module->getFunction("__pseudo_masked_store_32");
         lvalue = BitCastInst(lvalue, LLVMTypes::Int32VectorPointerType, 
                              "lvalue_to_int32vecptr");
         if (rvalueType == AtomicType::VaryingFloat)
             rvalue = BitCastInst(rvalue, LLVMTypes::Int32VectorType, 
                                  "rvalue_to_int32");
+    }
+    else if (rvalueType == AtomicType::VaryingInt16 ||
+             rvalueType == AtomicType::VaryingUInt16) {
+        maskedStoreFunc = m->module->getFunction("__pseudo_masked_store_16");
+        lvalue = BitCastInst(lvalue, LLVMTypes::Int16VectorPointerType, 
+                             "lvalue_to_int16vecptr");
+    }
+    else if (rvalueType == AtomicType::VaryingInt8 ||
+             rvalueType == AtomicType::VaryingUInt8) {
+        maskedStoreFunc = m->module->getFunction("__pseudo_masked_store_8");
+        lvalue = BitCastInst(lvalue, LLVMTypes::Int8VectorPointerType, 
+                             "lvalue_to_int8vecptr");
     }
 
     std::vector<llvm::Value *> args;
@@ -1668,14 +1697,15 @@ FunctionEmitContext::scatter(llvm::Value *rvalue, llvm::Value *lvalue,
         func = m->module->getFunction("__pseudo_scatter_64");
         rvalue = BitCastInst(rvalue, LLVMTypes::Int64VectorType, "rvalue2int");
     }
-    else {
-        // FIXME: if this hits, presumably it's due to needing int8 and/or
-        // int16 versions of scatter...
-        assert(type == LLVMTypes::FloatVectorType || 
-               type == LLVMTypes::Int32VectorType);
+    else if (type == LLVMTypes::FloatVectorType || 
+             type == LLVMTypes::Int32VectorType) {
         func = m->module->getFunction("__pseudo_scatter_32");
         rvalue = BitCastInst(rvalue, LLVMTypes::Int32VectorType, "rvalue2int");
     }
+    else if (type == LLVMTypes::Int16VectorType)
+        func = m->module->getFunction("__pseudo_scatter_16");
+    else if (type == LLVMTypes::Int8VectorType)
+        func = m->module->getFunction("__pseudo_scatter_8");
     assert(func != NULL);
     
     AddInstrumentationPoint("scatter");

@@ -93,6 +93,10 @@ lMaybeIssuePrecisionWarning(const AtomicType *toAtomicType,
                             SourcePos pos, const char *errorMsgBase) {
     switch (toAtomicType->basicType) {
     case AtomicType::TYPE_BOOL:
+    case AtomicType::TYPE_INT8:
+    case AtomicType::TYPE_UINT8:
+    case AtomicType::TYPE_INT16:
+    case AtomicType::TYPE_UINT16:
     case AtomicType::TYPE_INT32:
     case AtomicType::TYPE_UINT32:
     case AtomicType::TYPE_FLOAT:
@@ -101,6 +105,10 @@ lMaybeIssuePrecisionWarning(const AtomicType *toAtomicType,
     case AtomicType::TYPE_DOUBLE:
         if ((int)toAtomicType->basicType < (int)fromAtomicType->basicType &&
             toAtomicType->basicType != AtomicType::TYPE_BOOL &&
+            !(toAtomicType->basicType == AtomicType::TYPE_INT8 && 
+              fromAtomicType->basicType == AtomicType::TYPE_UINT8) &&
+            !(toAtomicType->basicType == AtomicType::TYPE_INT16 && 
+              fromAtomicType->basicType == AtomicType::TYPE_UINT16) &&
             !(toAtomicType->basicType == AtomicType::TYPE_INT32 && 
               fromAtomicType->basicType == AtomicType::TYPE_UINT32) &&
             !(toAtomicType->basicType == AtomicType::TYPE_INT64 && 
@@ -111,13 +119,14 @@ lMaybeIssuePrecisionWarning(const AtomicType *toAtomicType,
                     errorMsgBase);
         break;
     default:
-        FATAL("logic error in lMaybeIssuePrecisionWarning");
+        FATAL("logic error in lMaybeIssuePrecisionWarning()");
     }
 }
 
 
 Expr *
-Expr::TypeConv(const Type *toType, const char *errorMsgBase, bool failureOk) {
+Expr::TypeConv(const Type *toType, const char *errorMsgBase, bool failureOk,
+               bool issuePrecisionWarnings) {
     /* This function is way too long and complex.  Is type conversion stuff
        always this messy, or can this be cleaned up somehow? */
     assert(failureOk || errorMsgBase != NULL);
@@ -305,7 +314,7 @@ Expr::TypeConv(const Type *toType, const char *errorMsgBase, bool failureOk) {
         return NULL;
     }
 
-    if (!failureOk)
+    if (!failureOk && issuePrecisionWarnings)
         lMaybeIssuePrecisionWarning(toAtomicType, fromAtomicType, pos, 
                                     errorMsgBase);
 
@@ -363,14 +372,32 @@ lLLVMConstantValue(const Type *type, llvm::LLVMContext *ctx, double value) {
                 return (value != 0.) ? LLVMTrue : LLVMFalse;
             else
                 return LLVMBoolVector(value != 0.);
-        case AtomicType::TYPE_UINT32: {
+        case AtomicType::TYPE_INT8: {
+            int i = (int)value;
+            assert((double)i == value);
+            return isUniform ? LLVMInt8(i) : LLVMInt8Vector(i);
+        }
+        case AtomicType::TYPE_UINT8: {
             unsigned int i = (unsigned int)value;
-            return isUniform ? LLVMUInt32(i) : LLVMUInt32Vector(i);
+            return isUniform ? LLVMUInt8(i) : LLVMUInt8Vector(i);
+        }
+        case AtomicType::TYPE_INT16: {
+            int i = (int)value;
+            assert((double)i == value);
+            return isUniform ? LLVMInt16(i) : LLVMInt16Vector(i);
+        }
+        case AtomicType::TYPE_UINT16: {
+            unsigned int i = (unsigned int)value;
+            return isUniform ? LLVMUInt16(i) : LLVMUInt16Vector(i);
         }
         case AtomicType::TYPE_INT32: {
             int i = (int)value;
             assert((double)i == value);
             return isUniform ? LLVMInt32(i) : LLVMInt32Vector(i);
+        }
+        case AtomicType::TYPE_UINT32: {
+            unsigned int i = (unsigned int)value;
+            return isUniform ? LLVMUInt32(i) : LLVMUInt32Vector(i);
         }
         case AtomicType::TYPE_FLOAT:
             return isUniform ? LLVMFloat((float)value) : 
@@ -590,14 +617,13 @@ UnaryExpr::Optimize() {
     const Type *type = constExpr->GetType();
     bool isEnumType = dynamic_cast<const EnumType *>(type) != NULL;
 
-    if (type == AtomicType::UniformInt64 || 
-        type == AtomicType::VaryingInt64 ||
-        type == AtomicType::UniformUInt64 || 
-        type == AtomicType::VaryingUInt64 ||
-        type == AtomicType::UniformConstInt64 || 
-        type == AtomicType::VaryingConstInt64 ||
-        type == AtomicType::UniformConstUInt64 || 
-        type == AtomicType::VaryingConstUInt64)
+    const Type *baseType = type->GetAsNonConstType()->GetAsUniformType();
+    if (baseType == AtomicType::UniformInt8 ||
+        baseType == AtomicType::UniformUInt8 ||
+        baseType == AtomicType::UniformInt16 ||
+        baseType == AtomicType::UniformUInt16 ||
+        baseType == AtomicType::UniformInt64 ||
+        baseType == AtomicType::UniformUInt64)
         // FIXME: should handle these at some point; for now we only do
         // constant folding for bool, int32 and float types...
         return this;
@@ -985,6 +1011,7 @@ BinaryExpr::GetType() const {
         return lMatchingBoolType(promotedType);
     case Shl:
     case Shr:
+        return type1->IsVaryingType() ? type0->GetAsVaryingType() : type0;
     case BitAnd:
     case BitXor:
     case BitOr:
@@ -1284,15 +1311,28 @@ BinaryExpr::TypeCheck() {
             return NULL;
         }
 
-        const Type *promotedType = Type::MoreGeneralType(type0, type1, arg0->pos,
-                                                         "binary bit op");
-        if (promotedType == NULL)
-            return NULL;
+        if (op == Shl || op == Shr) {
+            bool isVarying = (type0->IsVaryingType() ||
+                              type1->IsVaryingType());
+            if (isVarying) {
+                arg0 = arg0->TypeConv(type0->GetAsVaryingType(), "shift operator");
+                type0 = arg0->GetType();
+            }
+            arg1 = arg1->TypeConv(type0, "shift operator", false, false);
+            if (arg1 == NULL)
+                return NULL;
+        }
+        else {
+            const Type *promotedType = Type::MoreGeneralType(type0, type1, arg0->pos,
+                                                             "binary bit op");
+            if (promotedType == NULL)
+                return NULL;
 
-        arg0 = arg0->TypeConv(promotedType, "binary bit op");
-        arg1 = arg1->TypeConv(promotedType, "binary bit op");
-        if (arg0 == NULL || arg1 == NULL)
-            return NULL;
+            arg0 = arg0->TypeConv(promotedType, "binary bit op");
+            arg1 = arg1->TypeConv(promotedType, "binary bit op");
+            if (arg0 == NULL || arg1 == NULL)
+                return NULL;
+        }
         return this;
     }
     case Add:
@@ -1634,7 +1674,7 @@ AssignExpr::TypeCheck() {
     if (rvalue != NULL) 
         rvalue = rvalue->TypeCheck();
     if (rvalue != NULL && lvalue != NULL) 
-        rvalue = rvalue->TypeConv(lvalue->GetType(), "operator =");
+        rvalue = rvalue->TypeConv(lvalue->GetType(), "assignment");
     if (rvalue == NULL || lvalue == NULL) 
         return NULL;
 
@@ -2060,7 +2100,8 @@ FunctionCallExpr::tryResolve(bool (*matchFunc)(Expr *, const Type *)) {
             // It's kind of a silly to redundantly discover this for each
             // potential match versus detecting this earlier in the
             // matching process and just giving up.
-            if (!callArgs[i] || !callArgs[i]->GetType() || !candArgTypes[i])
+            if (!callArgs[i] || !callArgs[i]->GetType() || !candArgTypes[i] ||
+                dynamic_cast<const FunctionType *>(callArgs[i]->GetType()) != NULL)
                 return false;
             
             // See if this caller argument matches the type of the
@@ -2795,6 +2836,288 @@ IndexExpr::Print() const {
 ///////////////////////////////////////////////////////////////////////////
 // MemberExpr
 
+/** Map one character ids to vector element numbers.  Allow a few different
+    conventions--xyzw, rgba, uv.
+ */
+static int
+lIdentifierToVectorElement(char id) {
+    switch (id) {
+    case 'x':
+    case 'r':
+    case 'u':
+        return 0;
+    case 'y':
+    case 'g':
+    case 'v':
+        return 1;
+    case 'z':
+    case 'b':
+        return 2;
+    case 'w':
+    case 'a':
+        return 3;
+    default:
+        return -1;
+    }
+}
+
+class StructMemberExpr : public MemberExpr
+{
+public:
+    StructMemberExpr(Expr *e, const char *id, SourcePos p,
+                     SourcePos idpos, const StructType* structType);
+
+    const Type* GetType() const;
+
+    int getElementNumber() const;
+
+private:
+    const StructType* exprStructType;
+};
+
+StructMemberExpr::StructMemberExpr(Expr *e, const char *id, SourcePos p,
+                                   SourcePos idpos,
+                                   const StructType* structType)
+    : MemberExpr(e, id, p, idpos), exprStructType(structType) {
+}
+
+const Type*
+StructMemberExpr::GetType() const {
+    // It's a struct, and the result type is the element
+    // type, possibly promoted to varying if the struct type / lvalue
+    // is varying.
+    const Type *elementType = exprStructType->GetElementType(identifier);
+    if (!elementType)
+        Error(identifierPos,
+              "Element name \"%s\" not present in struct type \"%s\".%s",
+              identifier.c_str(), exprStructType->GetString().c_str(),
+              getCandidateNearMatches().c_str());
+
+    if (exprStructType->IsVaryingType()) 
+        return elementType->GetAsVaryingType();
+    else
+        return elementType;
+}
+
+int
+StructMemberExpr::getElementNumber() const {
+    int elementNumber = exprStructType->GetElementNumber(identifier);
+    if (elementNumber == -1)
+        Error(identifierPos,
+              "Element name \"%s\" not present in struct type \"%s\".%s",
+              identifier.c_str(), exprStructType->GetString().c_str(),
+              getCandidateNearMatches().c_str());
+    return elementNumber;
+}
+
+class VectorMemberExpr : public MemberExpr
+{
+public:
+    VectorMemberExpr(Expr *e, const char *id, SourcePos p,
+                     SourcePos idpos, const VectorType* vectorType);
+
+    ~VectorMemberExpr();
+
+    const Type* GetType() const;
+
+    llvm::Value* GetLValue(FunctionEmitContext* ctx) const;
+
+    llvm::Value* GetValue(FunctionEmitContext* ctx) const;
+
+    int getElementNumber() const;
+private:
+    const VectorType* exprVectorType;
+    const VectorType* memberType;
+};
+
+VectorMemberExpr::VectorMemberExpr(Expr *e, const char *id, SourcePos p,
+                                   SourcePos idpos,
+                                   const VectorType* vectorType)
+    : MemberExpr(e, id, p, idpos), exprVectorType(vectorType) {
+    memberType = new VectorType(exprVectorType->GetElementType(),
+                                identifier.length());
+}
+
+VectorMemberExpr::~VectorMemberExpr() {
+    delete memberType;
+}
+
+const Type*
+VectorMemberExpr::GetType() const {
+    // For 1-element expressions, we have the base vector element
+    // type.  For n-element expressions, we have a shortvec type
+    // with n > 1 elements.  This can be changed when we get
+    // type<1> -> type conversions.
+    if (identifier.length() == 1) {
+        return exprVectorType->GetElementType();
+    } else {
+        return memberType;
+    }
+}
+
+llvm::Value*
+VectorMemberExpr::GetLValue(FunctionEmitContext* ctx) const {
+    if (identifier.length() == 1) {
+        return MemberExpr::GetLValue(ctx);
+    } else {
+        return NULL;
+    }
+}
+
+llvm::Value*
+VectorMemberExpr::GetValue(FunctionEmitContext* ctx) const {
+    if (identifier.length() == 1) {
+        return MemberExpr::GetValue(ctx);
+    } else {
+        std::vector<int> indices;
+
+        for (size_t i = 0; i < identifier.size(); ++i) {
+            int idx = lIdentifierToVectorElement(identifier[i]);
+            if (idx == -1)
+                Error(pos,
+                      "Invalid swizzle charcter '%c' in swizzle \"%s\".",
+                      identifier[i], identifier.c_str());
+
+            indices.push_back(idx);
+        }
+
+        llvm::Value *basePtr = expr->GetLValue(ctx);
+        if (basePtr == NULL) {
+            assert(m->errorCount > 0);
+            return NULL;
+        }
+        llvm::Value *ltmp = ctx->AllocaInst(memberType->LLVMType(g->ctx), 
+                                            "vector_tmp");
+
+        ctx->SetDebugPos(pos);
+        for (size_t i = 0; i < identifier.size(); ++i) {
+            llvm::Value *ptmp =
+                ctx->GetElementPtrInst(ltmp, 0, i, "new_offset");
+            llvm::Value *initLValue =
+                ctx->GetElementPtrInst(basePtr , 0,
+                                       indices[i], "orig_offset");
+            llvm::Value *initValue =
+                ctx->LoadInst(initLValue, memberType->GetElementType(),
+                              "vec_element");
+            ctx->StoreInst(initValue, ptmp);
+        }
+
+        return ctx->LoadInst(ltmp, memberType, "swizzle_vec");
+    }
+}
+
+int
+VectorMemberExpr::getElementNumber() const {
+    int elementNumber = lIdentifierToVectorElement(identifier[0]);
+    if (elementNumber == -1)
+        Error(pos, "Vector element identifier \"%s\" unknown.", 
+              identifier.c_str());
+    return elementNumber;
+}
+
+class ReferenceMemberExpr : public MemberExpr
+{
+public:
+    ReferenceMemberExpr(Expr *e, const char *id, SourcePos p,
+                        SourcePos idpos, const ReferenceType* referenceType);
+
+    const Type* GetType() const;
+
+    int getElementNumber() const;
+
+    llvm::Value* GetLValue(FunctionEmitContext* ctx) const;
+
+private:
+    const ReferenceType* exprReferenceType;
+    MemberExpr* dereferencedExpr;
+};
+
+ReferenceMemberExpr::ReferenceMemberExpr(Expr *e, const char *id, SourcePos p,
+                                         SourcePos idpos,
+                                         const ReferenceType* referenceType)
+    : MemberExpr(e, id, p, idpos), exprReferenceType(referenceType) {
+    const Type* refTarget = exprReferenceType->GetReferenceTarget();
+    const StructType* structType
+        = dynamic_cast<const StructType *>(refTarget);
+    const VectorType* vectorType
+        = dynamic_cast<const VectorType *>(refTarget);
+
+    if (structType != NULL) {
+        dereferencedExpr = new StructMemberExpr(e, id, p, idpos, structType);
+    } else if (vectorType != NULL) {
+        dereferencedExpr = new VectorMemberExpr(e, id, p, idpos, vectorType);
+    } else {
+        dereferencedExpr = NULL;
+    }
+}
+
+const Type*
+ReferenceMemberExpr::GetType() const {
+    if (dereferencedExpr == NULL) {
+        Error(pos, "Can't access member of non-struct/vector type \"%s\".",
+              exprReferenceType->GetString().c_str());
+        return NULL;
+    } else {
+        return dereferencedExpr->GetType();
+    }
+}
+
+int
+ReferenceMemberExpr::getElementNumber() const {
+    if (dereferencedExpr == NULL) {
+        // FIXME: I think we shouldn't ever get here and that
+        // typechecking should have caught this case
+        return -1;
+    } else {
+        return dereferencedExpr->getElementNumber();
+    }
+}
+
+llvm::Value*
+ReferenceMemberExpr::GetLValue(FunctionEmitContext* ctx) const {
+    if (dereferencedExpr == NULL) {
+        // FIXME: again I think typechecking should have caught this
+        Error(pos, "Can't access member of non-struct/vector type \"%s\".",
+              exprReferenceType->GetString().c_str());
+        return NULL;
+    }
+
+    //FIXME: Minor Code-dup...this is the same as the base, except
+    // llvm::Value *basePtr = expr->GetLValue instead of expr->getValue
+    llvm::Value *basePtr = expr->GetValue(ctx);
+    if (!basePtr)
+        return NULL;
+
+    int elementNumber = getElementNumber();
+    if (elementNumber == -1)
+        return NULL;
+
+    ctx->SetDebugPos(pos);
+    return ctx->GetElementPtrInst(basePtr, 0, elementNumber);
+}
+
+
+MemberExpr*
+MemberExpr::create(Expr *e, const char *id, SourcePos p, SourcePos idpos) {
+    const Type* exprType;
+    if (e == NULL || (exprType = e->GetType()) == NULL)
+        return new MemberExpr(e, id, p, idpos);
+
+    const StructType* structType = dynamic_cast<const StructType*>(exprType);
+    if (structType != NULL)
+        return new StructMemberExpr(e, id, p, idpos, structType);
+
+    const VectorType* vectorType = dynamic_cast<const VectorType*>(exprType);
+    if (vectorType != NULL)
+        return new VectorMemberExpr(e, id, p, idpos, vectorType);
+
+    const ReferenceType* referenceType = dynamic_cast<const ReferenceType*>(exprType);
+    if (referenceType != NULL)
+        return new ReferenceMemberExpr(e, id, p, idpos, referenceType);
+  
+    return new MemberExpr(e, id, p, idpos);
+}
+
 MemberExpr::MemberExpr(Expr *e, const char *id, SourcePos p, SourcePos idpos) 
     : Expr(p), identifierPos(idpos) {
     expr = e;
@@ -2836,48 +3159,7 @@ MemberExpr::GetValue(FunctionEmitContext *ctx) const {
 
 const Type *
 MemberExpr::GetType() const {
-    if (!expr)
-        return NULL;
-
-    const Type *exprType = expr->GetType();
-    if (!exprType)
-        return NULL;
-
-    const StructType *structType = dynamic_cast<const StructType *>(exprType);
-    const VectorType *vectorType = dynamic_cast<const VectorType *>(exprType);
-    if (!structType && !vectorType) {
-        const ReferenceType *referenceType = 
-            dynamic_cast<const ReferenceType *>(exprType);
-        const Type *refTarget = (referenceType == NULL) ? NULL :
-            referenceType->GetReferenceTarget();
-        if ((structType = dynamic_cast<const StructType *>(refTarget)) == NULL &&
-            (vectorType = dynamic_cast<const VectorType *>(refTarget)) == NULL) {
-            Error(pos, "Can't access member of non-struct/vector type \"%s\".",
-                  exprType->GetString().c_str());
-            return NULL;
-        }
-    }
-
-    if (vectorType != NULL)
-        // only one-element vector selection is supported for now (i.e. no
-        // swizzling "foo.xxy"), so the result type is always just the
-        // element type.
-        return vectorType->GetElementType();
-    else {
-        // Otherwise it's a struct, and the result type is the element
-        // type, possibly promoted to varying if the struct type / lvalue
-        // is varying.
-        const Type *elementType = structType->GetElementType(identifier);
-        if (!elementType)
-            Error(identifierPos, "Element name \"%s\" not present in struct type \"%s\".%s",
-                  identifier.c_str(), structType->GetString().c_str(),
-                  getCandidateNearMatches().c_str());
-
-        if (exprType->IsVaryingType()) 
-            return elementType->GetAsVaryingType();
-        else
-            return elementType;
-    }
+    return NULL;
 }
 
 
@@ -2887,106 +3169,23 @@ MemberExpr::GetBaseSymbol() const {
 }
 
 
-/** Map one character ids to vector element numbers.  Allow a few different
-    conventions--xyzw, rgba, uv.
- */
-static int
-lIdentifierToVectorElement(char id) {
-    switch (id) {
-    case 'x':
-    case 'r':
-    case 'u':
-        return 0;
-    case 'y':
-    case 'g':
-    case 'v':
-        return 1;
-    case 'z':
-    case 'b':
-        return 2;
-    case 'w':
-    case 'a':
-        return 3;
-    default:
-        return -1;
-    }
-}
-
-
 int
 MemberExpr::getElementNumber() const {
-    const Type *exprType;
-    if (!expr || ((exprType = expr->GetType()) == NULL))
-        return -1;
-
-    const StructType *structType = dynamic_cast<const StructType *>(exprType);
-    const VectorType *vectorType = dynamic_cast<const VectorType *>(exprType);
-    if (!structType && !vectorType) {
-        const ReferenceType *referenceType = 
-            dynamic_cast<const ReferenceType *>(exprType);
-        const Type *refTarget = (referenceType == NULL) ? NULL :
-            referenceType->GetReferenceTarget() ;
-        if ((structType = dynamic_cast<const StructType *>(refTarget)) == NULL &&
-            (vectorType = dynamic_cast<const VectorType *>(refTarget)) == NULL)
-            // FIXME: I think we shouldn't ever get here and that
-            // typechecking should have caught this case
-            return -1;
-    }
-
-    int elementNumber = -1;
-    if (vectorType) {
-        if (identifier.size() != 1) {
-            Error(pos, "Only single-character vector element accessors are currently "
-                  "supported--\"%s\" is invalid.  Sorry.", identifier.c_str());
-        }
-        else {
-            elementNumber = lIdentifierToVectorElement(identifier[0]);
-            if (elementNumber == -1)
-                Error(pos, "Vector element identifier \"%s\" unknown.", 
-                      identifier.c_str());
-        }
-    }
-    else {
-        elementNumber = structType->GetElementNumber(identifier);
-        if (elementNumber == -1)
-            Error(identifierPos, "Element name \"%s\" not present in struct type \"%s\".%s",
-                  identifier.c_str(), structType->GetString().c_str(),
-                  getCandidateNearMatches().c_str());
-    }
-    return elementNumber;
+    return -1;
 }
-
 
 
 llvm::Value *
 MemberExpr::GetLValue(FunctionEmitContext *ctx) const {
+    //This kindof feels like magic, but this functionality
+    // will have to be overridden in VectorMemberExpr when
+    // we support multi-swizzle.
     const Type *exprType;
     if (!expr || ((exprType = expr->GetType()) == NULL))
         return NULL;
 
     ctx->SetDebugPos(pos);
-    const StructType *structType = dynamic_cast<const StructType *>(exprType);
-    const VectorType *vectorType = dynamic_cast<const VectorType *>(exprType);
-    llvm::Value *basePtr = NULL;
-    if (structType || vectorType)
-        basePtr = expr->GetLValue(ctx);
-    else {
-        const ReferenceType *referenceType = dynamic_cast<const ReferenceType *>(exprType);
-        // FIXME: store structType and vectorType as members, or do all
-        // this in a separate function?  This code to figure out
-        // struct/vectorType is replicated a bunch of times in
-        // MemberExpr...
-        const Type *refTarget = (referenceType == NULL) ? NULL :
-            referenceType->GetReferenceTarget() ;
-        if ((structType = dynamic_cast<const StructType *>(refTarget)) == NULL &&
-            (vectorType = dynamic_cast<const VectorType *>(refTarget)) == NULL) {
-            // FIXME: again I think typechecking should have caught this
-            Error(pos, "Can't access member of non-struct/vector type \"%s\".",
-                  exprType->GetString().c_str());
-            return NULL;
-        }
-        basePtr = expr->GetValue(ctx);
-    }
+    llvm::Value *basePtr = expr->GetLValue(ctx);
     if (!basePtr)
         return NULL;
 
@@ -3057,6 +3256,86 @@ MemberExpr::getCandidateNearMatches() const {
 
 ///////////////////////////////////////////////////////////////////////////
 // ConstExpr
+
+ConstExpr::ConstExpr(const Type *t, int8_t i, SourcePos p) 
+  : Expr(p) {
+    type = t;
+    type = type->GetAsConstType();
+    assert(type == AtomicType::UniformConstInt8);
+    int8Val[0] = i;
+}
+
+
+ConstExpr::ConstExpr(const Type *t, int8_t *i, SourcePos p) 
+  : Expr(p) {
+    type = t;
+    type = type->GetAsConstType();
+    assert(type == AtomicType::UniformConstInt8 || 
+           type == AtomicType::VaryingConstInt8);
+    for (int j = 0; j < Count(); ++j)
+        int8Val[j] = i[j];
+}
+
+
+ConstExpr::ConstExpr(const Type *t, uint8_t u, SourcePos p) 
+  : Expr(p) {
+    type = t;
+    type = type->GetAsConstType();
+    assert(type == AtomicType::UniformUInt8);
+    uint8Val[0] = u;
+}
+
+
+ConstExpr::ConstExpr(const Type *t, uint8_t *u, SourcePos p) 
+  : Expr(p) {
+    type = t;
+    type = type->GetAsConstType();
+    assert(type == AtomicType::UniformConstUInt8 || 
+           type == AtomicType::VaryingConstUInt8);
+    for (int j = 0; j < Count(); ++j)
+        uint8Val[j] = u[j];
+}
+
+
+ConstExpr::ConstExpr(const Type *t, int16_t i, SourcePos p) 
+  : Expr(p) {
+    type = t;
+    type = type->GetAsConstType();
+    assert(type == AtomicType::UniformConstInt16);
+    int16Val[0] = i;
+}
+
+
+ConstExpr::ConstExpr(const Type *t, int16_t *i, SourcePos p) 
+  : Expr(p) {
+    type = t;
+    type = type->GetAsConstType();
+    assert(type == AtomicType::UniformConstInt16 || 
+           type == AtomicType::VaryingConstInt16);
+    for (int j = 0; j < Count(); ++j)
+        int16Val[j] = i[j];
+}
+
+
+ConstExpr::ConstExpr(const Type *t, uint16_t u, SourcePos p) 
+  : Expr(p) {
+    type = t;
+    type = type->GetAsConstType();
+    assert(type == AtomicType::UniformUInt16);
+    uint16Val[0] = u;
+}
+
+
+ConstExpr::ConstExpr(const Type *t, uint16_t *u, SourcePos p) 
+  : Expr(p) {
+    type = t;
+    type = type->GetAsConstType();
+    assert(type == AtomicType::UniformConstUInt16 || 
+           type == AtomicType::VaryingConstUInt16);
+    for (int j = 0; j < Count(); ++j)
+        uint16Val[j] = u[j];
+}
+
 
 ConstExpr::ConstExpr(const Type *t, int32_t i, SourcePos p) 
   : Expr(p) {
@@ -3212,6 +3491,22 @@ ConstExpr::ConstExpr(ConstExpr *old, double *v)
         for (int i = 0; i < Count(); ++i)
             boolVal[i] = (v[i] != 0.);
         break;
+    case AtomicType::TYPE_INT8:
+        for (int i = 0; i < Count(); ++i)
+            int8Val[i] = (int)v[i];
+        break;
+    case AtomicType::TYPE_UINT8:
+        for (int i = 0; i < Count(); ++i)
+            uint8Val[i] = (unsigned int)v[i];
+        break;
+    case AtomicType::TYPE_INT16:
+        for (int i = 0; i < Count(); ++i)
+            int16Val[i] = (int)v[i];
+        break;
+    case AtomicType::TYPE_UINT16:
+        for (int i = 0; i < Count(); ++i)
+            uint16Val[i] = (unsigned int)v[i];
+        break;
     case AtomicType::TYPE_INT32:
         for (int i = 0; i < Count(); ++i)
             int32Val[i] = (int)v[i];
@@ -3270,6 +3565,18 @@ ConstExpr::GetValue(FunctionEmitContext *ctx) const {
             return LLVMBoolVector(boolVal);
         else
             return boolVal[0] ? LLVMTrue : LLVMFalse;
+    case AtomicType::TYPE_INT8:
+        return isVarying ? LLVMInt8Vector(int8Val) : 
+                           LLVMInt8(int8Val[0]);
+    case AtomicType::TYPE_UINT8:
+        return isVarying ? LLVMUInt8Vector(uint8Val) : 
+                           LLVMUInt8(uint8Val[0]);
+    case AtomicType::TYPE_INT16:
+        return isVarying ? LLVMInt16Vector(int16Val) : 
+                           LLVMInt16(int16Val[0]);
+    case AtomicType::TYPE_UINT16:
+        return isVarying ? LLVMUInt16Vector(uint16Val) : 
+                           LLVMUInt16(uint16Val[0]);
     case AtomicType::TYPE_INT32:
         return isVarying ? LLVMInt32Vector(int32Val) : 
                            LLVMInt32(int32Val[0]);
@@ -3351,6 +3658,10 @@ int
 ConstExpr::AsInt64(int64_t *ip, bool forceVarying) const {
     switch (getBasicType()) {
     case AtomicType::TYPE_BOOL:   lConvert(boolVal,   ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT8:   lConvert(int8Val,   ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT8:  lConvert(uint8Val,  ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT16:  lConvert(int16Val,  ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT16: lConvert(uint16Val, ip, Count(), forceVarying); break;
     case AtomicType::TYPE_INT32:  lConvert(int32Val,  ip, Count(), forceVarying); break;
     case AtomicType::TYPE_UINT32: lConvert(uint32Val, ip, Count(), forceVarying); break;
     case AtomicType::TYPE_FLOAT:  lConvert(floatVal,  ip, Count(), forceVarying); break;
@@ -3368,6 +3679,10 @@ int
 ConstExpr::AsUInt64(uint64_t *up, bool forceVarying) const {
     switch (getBasicType()) {
     case AtomicType::TYPE_BOOL:   lConvert(boolVal,   up, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT8:   lConvert(int8Val,   up, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT8:  lConvert(uint8Val,  up, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT16:  lConvert(int16Val,  up, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT16: lConvert(uint16Val, up, Count(), forceVarying); break;
     case AtomicType::TYPE_INT32:  lConvert(int32Val,  up, Count(), forceVarying); break;
     case AtomicType::TYPE_UINT32: lConvert(uint32Val, up, Count(), forceVarying); break;
     case AtomicType::TYPE_FLOAT:  lConvert(floatVal,  up, Count(), forceVarying); break;
@@ -3385,6 +3700,10 @@ int
 ConstExpr::AsDouble(double *d, bool forceVarying) const {
     switch (getBasicType()) {
     case AtomicType::TYPE_BOOL:   lConvert(boolVal,   d, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT8:   lConvert(int8Val,   d, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT8:  lConvert(uint8Val,  d, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT16:  lConvert(int16Val,  d, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT16: lConvert(uint16Val, d, Count(), forceVarying); break;
     case AtomicType::TYPE_INT32:  lConvert(int32Val,  d, Count(), forceVarying); break;
     case AtomicType::TYPE_UINT32: lConvert(uint32Val, d, Count(), forceVarying); break;
     case AtomicType::TYPE_FLOAT:  lConvert(floatVal,  d, Count(), forceVarying); break;
@@ -3402,6 +3721,10 @@ int
 ConstExpr::AsFloat(float *fp, bool forceVarying) const {
     switch (getBasicType()) {
     case AtomicType::TYPE_BOOL:   lConvert(boolVal,   fp, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT8:   lConvert(int8Val,   fp, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT8:  lConvert(uint8Val,  fp, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT16:  lConvert(int16Val,  fp, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT16: lConvert(uint16Val, fp, Count(), forceVarying); break;
     case AtomicType::TYPE_INT32:  lConvert(int32Val,  fp, Count(), forceVarying); break;
     case AtomicType::TYPE_UINT32: lConvert(uint32Val, fp, Count(), forceVarying); break;
     case AtomicType::TYPE_FLOAT:  lConvert(floatVal,  fp, Count(), forceVarying); break;
@@ -3419,6 +3742,10 @@ int
 ConstExpr::AsBool(bool *b, bool forceVarying) const {
     switch (getBasicType()) {
     case AtomicType::TYPE_BOOL:   lConvert(boolVal,   b, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT8:   lConvert(int8Val,   b, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT8:  lConvert(uint8Val,  b, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT16:  lConvert(int16Val,  b, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT16: lConvert(uint16Val, b, Count(), forceVarying); break;
     case AtomicType::TYPE_INT32:  lConvert(int32Val,  b, Count(), forceVarying); break;
     case AtomicType::TYPE_UINT32: lConvert(uint32Val, b, Count(), forceVarying); break;
     case AtomicType::TYPE_FLOAT:  lConvert(floatVal,  b, Count(), forceVarying); break;
@@ -3433,9 +3760,97 @@ ConstExpr::AsBool(bool *b, bool forceVarying) const {
 
 
 int
+ConstExpr::AsInt8(int8_t *ip, bool forceVarying) const {
+    switch (getBasicType()) {
+    case AtomicType::TYPE_BOOL:   lConvert(boolVal,   ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT8:   lConvert(int8Val,   ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT8:  lConvert(uint8Val,  ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT16:  lConvert(int16Val,  ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT16: lConvert(uint16Val, ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT32:  lConvert(int32Val,  ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT32: lConvert(uint32Val, ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_FLOAT:  lConvert(floatVal,  ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_DOUBLE: lConvert(doubleVal, ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT64:  lConvert(int64Val,  ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT64: lConvert(uint64Val, ip, Count(), forceVarying); break;
+    default:
+        FATAL("unimplemented const type");
+    }
+    return Count();
+}
+
+
+int
+ConstExpr::AsUInt8(uint8_t *up, bool forceVarying) const {
+    switch (getBasicType()) {
+    case AtomicType::TYPE_BOOL:   lConvert(boolVal,   up, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT8:   lConvert(int8Val,   up, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT8:  lConvert(uint8Val,  up, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT16:  lConvert(int16Val,  up, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT16: lConvert(uint16Val, up, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT32:  lConvert(int32Val,  up, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT32: lConvert(uint32Val, up, Count(), forceVarying); break;
+    case AtomicType::TYPE_FLOAT:  lConvert(floatVal,  up, Count(), forceVarying); break;
+    case AtomicType::TYPE_DOUBLE: lConvert(doubleVal, up, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT64:  lConvert(int64Val,  up, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT64: lConvert(uint64Val, up, Count(), forceVarying); break;
+    default:
+        FATAL("unimplemented const type");
+    }
+    return Count();
+}
+
+
+int
+ConstExpr::AsInt16(int16_t *ip, bool forceVarying) const {
+    switch (getBasicType()) {
+    case AtomicType::TYPE_BOOL:   lConvert(boolVal,   ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT8:   lConvert(int8Val,   ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT8:  lConvert(uint8Val,  ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT16:  lConvert(int16Val,  ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT16: lConvert(uint16Val, ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT32:  lConvert(int32Val,  ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT32: lConvert(uint32Val, ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_FLOAT:  lConvert(floatVal,  ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_DOUBLE: lConvert(doubleVal, ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT64:  lConvert(int64Val,  ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT64: lConvert(uint64Val, ip, Count(), forceVarying); break;
+    default:
+        FATAL("unimplemented const type");
+    }
+    return Count();
+}
+
+
+int
+ConstExpr::AsUInt16(uint16_t *up, bool forceVarying) const {
+    switch (getBasicType()) {
+    case AtomicType::TYPE_BOOL:   lConvert(boolVal,   up, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT8:   lConvert(int8Val,   up, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT8:  lConvert(uint8Val,  up, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT16:  lConvert(int16Val,  up, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT16: lConvert(uint16Val, up, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT32:  lConvert(int32Val,  up, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT32: lConvert(uint32Val, up, Count(), forceVarying); break;
+    case AtomicType::TYPE_FLOAT:  lConvert(floatVal,  up, Count(), forceVarying); break;
+    case AtomicType::TYPE_DOUBLE: lConvert(doubleVal, up, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT64:  lConvert(int64Val,  up, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT64: lConvert(uint64Val, up, Count(), forceVarying); break;
+    default:
+        FATAL("unimplemented const type");
+    }
+    return Count();
+}
+
+
+int
 ConstExpr::AsInt32(int32_t *ip, bool forceVarying) const {
     switch (getBasicType()) {
     case AtomicType::TYPE_BOOL:   lConvert(boolVal,   ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT8:   lConvert(int8Val,   ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT8:  lConvert(uint8Val,  ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT16:  lConvert(int16Val,  ip, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT16: lConvert(uint16Val, ip, Count(), forceVarying); break;
     case AtomicType::TYPE_INT32:  lConvert(int32Val,  ip, Count(), forceVarying); break;
     case AtomicType::TYPE_UINT32: lConvert(uint32Val, ip, Count(), forceVarying); break;
     case AtomicType::TYPE_FLOAT:  lConvert(floatVal,  ip, Count(), forceVarying); break;
@@ -3453,6 +3868,10 @@ int
 ConstExpr::AsUInt32(uint32_t *up, bool forceVarying) const {
     switch (getBasicType()) {
     case AtomicType::TYPE_BOOL:   lConvert(boolVal,   up, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT8:   lConvert(int8Val,   up, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT8:  lConvert(uint8Val,  up, Count(), forceVarying); break;
+    case AtomicType::TYPE_INT16:  lConvert(int16Val,  up, Count(), forceVarying); break;
+    case AtomicType::TYPE_UINT16: lConvert(uint16Val, up, Count(), forceVarying); break;
     case AtomicType::TYPE_INT32:  lConvert(int32Val,  up, Count(), forceVarying); break;
     case AtomicType::TYPE_UINT32: lConvert(uint32Val, up, Count(), forceVarying); break;
     case AtomicType::TYPE_FLOAT:  lConvert(floatVal,  up, Count(), forceVarying); break;
@@ -3487,6 +3906,40 @@ ConstExpr::GetConstant(const Type *type) const {
             return bv[0] ? LLVMTrue : LLVMFalse;
         else
             return LLVMBoolVector(bv);
+    }
+    else if (type == AtomicType::UniformInt8 || type == AtomicType::VaryingInt8) {
+        int8_t iv[ISPC_MAX_NVEC];
+        AsInt8(iv, type->IsVaryingType());
+        if (type->IsUniformType())
+            return LLVMInt8(iv[0]);
+        else
+            return LLVMInt8Vector(iv);
+    }
+    else if (type == AtomicType::UniformUInt8 || type == AtomicType::VaryingUInt8 ||
+             dynamic_cast<const EnumType *>(type) != NULL) {
+        uint8_t uiv[ISPC_MAX_NVEC];
+        AsUInt8(uiv, type->IsVaryingType());
+        if (type->IsUniformType())
+            return LLVMUInt8(uiv[0]);
+        else
+            return LLVMUInt8Vector(uiv);
+    }
+    else if (type == AtomicType::UniformInt16 || type == AtomicType::VaryingInt16) {
+        int16_t iv[ISPC_MAX_NVEC];
+        AsInt16(iv, type->IsVaryingType());
+        if (type->IsUniformType())
+            return LLVMInt16(iv[0]);
+        else
+            return LLVMInt16Vector(iv);
+    }
+    else if (type == AtomicType::UniformUInt16 || type == AtomicType::VaryingUInt16 ||
+             dynamic_cast<const EnumType *>(type) != NULL) {
+        uint16_t uiv[ISPC_MAX_NVEC];
+        AsUInt16(uiv, type->IsVaryingType());
+        if (type->IsUniformType())
+            return LLVMUInt16(uiv[0]);
+        else
+            return LLVMUInt16Vector(uiv);
     }
     else if (type == AtomicType::UniformInt32 || type == AtomicType::VaryingInt32) {
         int32_t iv[ISPC_MAX_NVEC];
@@ -3564,6 +4017,18 @@ ConstExpr::Print() const {
         case AtomicType::TYPE_BOOL:
             printf("%s", boolVal[i] ? "true" : "false");
             break;
+        case AtomicType::TYPE_INT8:
+            printf("%d", (int)int8Val[i]);
+            break;
+        case AtomicType::TYPE_UINT8:
+            printf("%u", (int)uint8Val[i]);
+            break;
+        case AtomicType::TYPE_INT16:
+            printf("%d", (int)int16Val[i]);
+            break;
+        case AtomicType::TYPE_UINT16:
+            printf("%u", (int)uint16Val[i]);
+            break;
         case AtomicType::TYPE_INT32:
             printf("%d", int32Val[i]);
             break;
@@ -3637,11 +4102,15 @@ lTypeConvAtomic(FunctionEmitContext *ctx, llvm::Value *exprVal,
             cast = ctx->CastInst(llvm::Instruction::UIToFP, // unsigned int
                                  exprVal, targetType, "bool2float");
             break;
+        case AtomicType::TYPE_INT8:
+        case AtomicType::TYPE_INT16:
         case AtomicType::TYPE_INT32:
         case AtomicType::TYPE_INT64:
             cast = ctx->CastInst(llvm::Instruction::SIToFP, // signed int to float
                                  exprVal, targetType, "int2float");
             break;
+        case AtomicType::TYPE_UINT8:
+        case AtomicType::TYPE_UINT16:
         case AtomicType::TYPE_UINT32:
         case AtomicType::TYPE_UINT64:
             if (fromType->IsVaryingType())
@@ -3675,11 +4144,15 @@ lTypeConvAtomic(FunctionEmitContext *ctx, llvm::Value *exprVal,
             cast = ctx->CastInst(llvm::Instruction::UIToFP, // unsigned int to double
                                  exprVal, targetType, "bool2double");
             break;
+        case AtomicType::TYPE_INT8:
+        case AtomicType::TYPE_INT16:
         case AtomicType::TYPE_INT32:
         case AtomicType::TYPE_INT64:
             cast = ctx->CastInst(llvm::Instruction::SIToFP, // signed int
                                  exprVal, targetType, "int2double");
             break;
+        case AtomicType::TYPE_UINT8:
+        case AtomicType::TYPE_UINT16:
         case AtomicType::TYPE_UINT32:
         case AtomicType::TYPE_UINT64:
             if (fromType->IsVaryingType())
@@ -3699,6 +4172,170 @@ lTypeConvAtomic(FunctionEmitContext *ctx, llvm::Value *exprVal,
         }
         break;
     }
+    case AtomicType::TYPE_INT8: {
+        LLVM_TYPE_CONST llvm::Type *targetType = 
+            fromType->IsUniformType() ? LLVMTypes::Int8Type :
+                                        LLVMTypes::Int8VectorType;
+        switch (fromType->basicType) {
+        case AtomicType::TYPE_BOOL:
+            if (fromType->IsVaryingType() && 
+                LLVMTypes::BoolVectorType == LLVMTypes::Int32VectorType)
+                exprVal = ctx->TruncInst(exprVal, LLVMTypes::Int1VectorType, "bool_to_i1");
+            cast = ctx->ZExtInst(exprVal, targetType, "bool2int");
+            break;
+        case AtomicType::TYPE_INT8:
+        case AtomicType::TYPE_UINT8:
+            cast = exprVal;
+            break;
+        case AtomicType::TYPE_INT16:
+        case AtomicType::TYPE_UINT16:
+        case AtomicType::TYPE_INT32:
+        case AtomicType::TYPE_UINT32:
+        case AtomicType::TYPE_INT64:
+        case AtomicType::TYPE_UINT64:
+            cast = ctx->TruncInst(exprVal, targetType, "int64_to_int8");
+            break;
+        case AtomicType::TYPE_FLOAT:
+            cast = ctx->CastInst(llvm::Instruction::FPToSI, // signed int
+                                 exprVal, targetType, "float2int");
+            break;
+        case AtomicType::TYPE_DOUBLE:
+            cast = ctx->CastInst(llvm::Instruction::FPToSI, // signed int
+                                 exprVal, targetType, "double2int");
+            break;
+        default:
+            FATAL("unimplemented");
+        }
+        break;
+    }
+    case AtomicType::TYPE_UINT8: {
+        LLVM_TYPE_CONST llvm::Type *targetType = 
+            fromType->IsUniformType() ? LLVMTypes::Int8Type :
+                                        LLVMTypes::Int8VectorType;
+        switch (fromType->basicType) {
+        case AtomicType::TYPE_BOOL:
+            if (fromType->IsVaryingType() && 
+                LLVMTypes::BoolVectorType == LLVMTypes::Int32VectorType)
+                exprVal = ctx->TruncInst(exprVal, LLVMTypes::Int1VectorType, "bool_to_i1");
+            cast = ctx->ZExtInst(exprVal, targetType, "bool2uint");
+            break;
+        case AtomicType::TYPE_INT8:
+        case AtomicType::TYPE_UINT8:
+            cast = exprVal;
+            break;
+        case AtomicType::TYPE_INT16:
+        case AtomicType::TYPE_UINT16:
+        case AtomicType::TYPE_INT32:
+        case AtomicType::TYPE_UINT32:
+        case AtomicType::TYPE_INT64:
+        case AtomicType::TYPE_UINT64:
+            cast = ctx->TruncInst(exprVal, targetType, "int64_to_uint8");
+            break;
+        case AtomicType::TYPE_FLOAT:
+            if (fromType->IsVaryingType())
+                PerformanceWarning(pos, "Conversion from float to unsigned int is slow. "
+                                   "Use \"int\" if possible");
+            cast = ctx->CastInst(llvm::Instruction::FPToUI, // unsigned int
+                                 exprVal, targetType, "float2uint");
+            break;
+        case AtomicType::TYPE_DOUBLE:
+            if (fromType->IsVaryingType())
+                PerformanceWarning(pos, "Conversion from double to unsigned int is slow. "
+                                   "Use \"int\" if possible");
+            cast = ctx->CastInst(llvm::Instruction::FPToUI, // unsigned int
+                                 exprVal, targetType, "double2uint");
+            break;
+        default:
+            FATAL("unimplemented");
+        }
+        break;
+    }
+    case AtomicType::TYPE_INT16: {
+        LLVM_TYPE_CONST llvm::Type *targetType = 
+            fromType->IsUniformType() ? LLVMTypes::Int16Type :
+                                        LLVMTypes::Int16VectorType;
+        switch (fromType->basicType) {
+        case AtomicType::TYPE_BOOL:
+            if (fromType->IsVaryingType() && 
+                LLVMTypes::BoolVectorType == LLVMTypes::Int32VectorType)
+                exprVal = ctx->TruncInst(exprVal, LLVMTypes::Int1VectorType, "bool_to_i1");
+            cast = ctx->ZExtInst(exprVal, targetType, "bool2int");
+            break;
+        case AtomicType::TYPE_INT8:
+            cast = ctx->SExtInst(exprVal, targetType, "int2int16");
+            break;
+        case AtomicType::TYPE_UINT8:
+            cast = ctx->ZExtInst(exprVal, targetType, "uint2uint16");
+            break;
+        case AtomicType::TYPE_INT16:
+        case AtomicType::TYPE_UINT16:
+            cast = exprVal;
+            break;
+        case AtomicType::TYPE_FLOAT:
+            cast = ctx->CastInst(llvm::Instruction::FPToSI, // signed int
+                                 exprVal, targetType, "float2int");
+            break;
+        case AtomicType::TYPE_INT32:
+        case AtomicType::TYPE_UINT32:
+        case AtomicType::TYPE_INT64:
+        case AtomicType::TYPE_UINT64:
+            cast = ctx->TruncInst(exprVal, targetType, "int64_to_int16");
+            break;
+        case AtomicType::TYPE_DOUBLE:
+            cast = ctx->CastInst(llvm::Instruction::FPToSI, // signed int
+                                 exprVal, targetType, "double2int");
+            break;
+        default:
+            FATAL("unimplemented");
+        }
+        break;
+    }
+    case AtomicType::TYPE_UINT16: {
+        LLVM_TYPE_CONST llvm::Type *targetType = 
+            fromType->IsUniformType() ? LLVMTypes::Int16Type :
+                                        LLVMTypes::Int16VectorType;
+        switch (fromType->basicType) {
+        case AtomicType::TYPE_BOOL:
+            if (fromType->IsVaryingType() && 
+                LLVMTypes::BoolVectorType == LLVMTypes::Int32VectorType)
+                exprVal = ctx->TruncInst(exprVal, LLVMTypes::Int1VectorType, "bool_to_i1");
+            cast = ctx->ZExtInst(exprVal, targetType, "bool2uint16");
+            break;
+        case AtomicType::TYPE_INT8:
+            cast = ctx->SExtInst(exprVal, targetType, "uint2uint16");
+            break;
+        case AtomicType::TYPE_UINT8:
+            cast = ctx->ZExtInst(exprVal, targetType, "uint2uint16");
+            break;            
+        case AtomicType::TYPE_INT16:
+        case AtomicType::TYPE_UINT16:
+            cast = exprVal;
+            break;
+        case AtomicType::TYPE_FLOAT:
+            if (fromType->IsVaryingType())
+                PerformanceWarning(pos, "Conversion from float to unsigned int is slow. "
+                                   "Use \"int\" if possible");
+            cast = ctx->CastInst(llvm::Instruction::FPToUI, // unsigned int
+                                 exprVal, targetType, "float2uint");
+            break;
+        case AtomicType::TYPE_INT32:
+        case AtomicType::TYPE_UINT32:
+        case AtomicType::TYPE_INT64:
+        case AtomicType::TYPE_UINT64:
+            cast = ctx->TruncInst(exprVal, targetType, "int64_to_uint16");
+            break;
+        case AtomicType::TYPE_DOUBLE:
+            if (fromType->IsVaryingType())
+                PerformanceWarning(pos, "Conversion from double to unsigned int is slow. "
+                                   "Use \"int\" if possible");
+            cast = ctx->CastInst(llvm::Instruction::FPToUI, // unsigned int
+                                 exprVal, targetType, "double2uint");
+            break;
+        default:
+            FATAL("unimplemented");
+        }
+        break;
+    }
     case AtomicType::TYPE_INT32: {
         LLVM_TYPE_CONST llvm::Type *targetType = 
             fromType->IsUniformType() ? LLVMTypes::Int32Type :
@@ -3709,6 +4346,14 @@ lTypeConvAtomic(FunctionEmitContext *ctx, llvm::Value *exprVal,
                 LLVMTypes::BoolVectorType == LLVMTypes::Int32VectorType)
                 exprVal = ctx->TruncInst(exprVal, LLVMTypes::Int1VectorType, "bool_to_i1");
             cast = ctx->ZExtInst(exprVal, targetType, "bool2int");
+            break;
+        case AtomicType::TYPE_INT8:
+        case AtomicType::TYPE_INT16:
+            cast = ctx->SExtInst(exprVal, targetType, "int2int32");
+            break;
+        case AtomicType::TYPE_UINT8:
+        case AtomicType::TYPE_UINT16:
+            cast = ctx->ZExtInst(exprVal, targetType, "uint2uint32");
             break;
         case AtomicType::TYPE_INT32:
         case AtomicType::TYPE_UINT32:
@@ -3742,6 +4387,14 @@ lTypeConvAtomic(FunctionEmitContext *ctx, llvm::Value *exprVal,
                 exprVal = ctx->TruncInst(exprVal, LLVMTypes::Int1VectorType, "bool_to_i1");
             cast = ctx->ZExtInst(exprVal, targetType, "bool2uint");
             break;
+        case AtomicType::TYPE_INT8:
+        case AtomicType::TYPE_INT16:
+            cast = ctx->SExtInst(exprVal, targetType, "uint2uint");
+            break;
+        case AtomicType::TYPE_UINT8:
+        case AtomicType::TYPE_UINT16:
+            cast = ctx->ZExtInst(exprVal, targetType, "uint2uint");
+            break;            
         case AtomicType::TYPE_INT32:
         case AtomicType::TYPE_UINT32:
             cast = exprVal;
@@ -3780,11 +4433,15 @@ lTypeConvAtomic(FunctionEmitContext *ctx, llvm::Value *exprVal,
                 exprVal = ctx->TruncInst(exprVal, LLVMTypes::Int1VectorType, "bool_to_i1");
             cast = ctx->ZExtInst(exprVal, targetType, "bool2int64");
             break;
+        case AtomicType::TYPE_INT8:
+        case AtomicType::TYPE_INT16:
         case AtomicType::TYPE_INT32:
-            cast = ctx->SExtInst(exprVal, targetType, "int32_to_int64");
+            cast = ctx->SExtInst(exprVal, targetType, "int_to_int64");
             break;
+        case AtomicType::TYPE_UINT8:
+        case AtomicType::TYPE_UINT16:
         case AtomicType::TYPE_UINT32:
-            cast = ctx->ZExtInst(exprVal, targetType, "uint32_to_int64");
+            cast = ctx->ZExtInst(exprVal, targetType, "uint_to_int64");
             break;
         case AtomicType::TYPE_FLOAT:
             cast = ctx->CastInst(llvm::Instruction::FPToSI, // signed int
@@ -3796,7 +4453,7 @@ lTypeConvAtomic(FunctionEmitContext *ctx, llvm::Value *exprVal,
             break;
         case AtomicType::TYPE_DOUBLE:
             cast = ctx->CastInst(llvm::Instruction::FPToSI, // signed int
-                                 exprVal, targetType, "double2int");
+                                 exprVal, targetType, "double2int64");
             break;
         default:
             FATAL("unimplemented");
@@ -3814,11 +4471,15 @@ lTypeConvAtomic(FunctionEmitContext *ctx, llvm::Value *exprVal,
                 exprVal = ctx->TruncInst(exprVal, LLVMTypes::Int1VectorType, "bool_to_i1");
             cast = ctx->ZExtInst(exprVal, targetType, "bool2uint");
             break;
+        case AtomicType::TYPE_INT8:
+        case AtomicType::TYPE_INT16:
         case AtomicType::TYPE_INT32:
-            cast = ctx->SExtInst(exprVal, targetType, "int32_to_uint64");
+            cast = ctx->SExtInst(exprVal, targetType, "int_to_uint64");
             break;
+        case AtomicType::TYPE_UINT8:
+        case AtomicType::TYPE_UINT16:
         case AtomicType::TYPE_UINT32:
-            cast = ctx->ZExtInst(exprVal, targetType, "uint32_to_uint64");
+            cast = ctx->ZExtInst(exprVal, targetType, "uint_to_uint64");
             break;
         case AtomicType::TYPE_FLOAT:
             if (fromType->IsVaryingType())
@@ -3848,6 +4509,22 @@ lTypeConvAtomic(FunctionEmitContext *ctx, llvm::Value *exprVal,
         case AtomicType::TYPE_BOOL:
             cast = exprVal;
             break;
+        case AtomicType::TYPE_INT8:
+        case AtomicType::TYPE_UINT8: {
+            llvm::Value *zero = fromType->IsUniformType() ? (llvm::Value *)LLVMInt8(0) : 
+                (llvm::Value *)LLVMInt8Vector((int8_t)0);
+            cast = ctx->CmpInst(llvm::Instruction::ICmp, llvm::CmpInst::ICMP_NE,
+                                exprVal, zero, "cmpi0");
+            break;
+        }
+        case AtomicType::TYPE_INT16:
+        case AtomicType::TYPE_UINT16: {
+            llvm::Value *zero = fromType->IsUniformType() ? (llvm::Value *)LLVMInt16(0) : 
+                (llvm::Value *)LLVMInt16Vector((int16_t)0);
+            cast = ctx->CmpInst(llvm::Instruction::ICmp, llvm::CmpInst::ICMP_NE,
+                                exprVal, zero, "cmpi0");
+            break;
+        }
         case AtomicType::TYPE_INT32:
         case AtomicType::TYPE_UINT32: {
             llvm::Value *zero = fromType->IsUniformType() ? (llvm::Value *)LLVMInt32(0) : 
@@ -4194,6 +4871,26 @@ TypeCastExpr::Optimize() {
         bool bv[ISPC_MAX_NVEC];
         constExpr->AsBool(bv, forceVarying);
         return new ConstExpr(toType, bv, pos);
+    }
+    case AtomicType::TYPE_INT8: {
+        int8_t iv[ISPC_MAX_NVEC];
+        constExpr->AsInt8(iv, forceVarying);
+        return new ConstExpr(toType, iv, pos);
+    }
+    case AtomicType::TYPE_UINT8: {
+        uint8_t uv[ISPC_MAX_NVEC];
+        constExpr->AsUInt8(uv, forceVarying);
+        return new ConstExpr(toType, uv, pos);
+    }
+    case AtomicType::TYPE_INT16: {
+        int16_t iv[ISPC_MAX_NVEC];
+        constExpr->AsInt16(iv, forceVarying);
+        return new ConstExpr(toType, iv, pos);
+    }
+    case AtomicType::TYPE_UINT16: {
+        uint16_t uv[ISPC_MAX_NVEC];
+        constExpr->AsUInt16(uv, forceVarying);
+        return new ConstExpr(toType, uv, pos);
     }
     case AtomicType::TYPE_INT32: {
         int32_t iv[ISPC_MAX_NVEC];

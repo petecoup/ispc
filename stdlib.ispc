@@ -85,6 +85,14 @@ static inline float broadcast(float v, uniform int i) {
     return __broadcast_float(v, i);
 }
 
+static inline int8 broadcast(int8 v, uniform int i) {
+    return __broadcast_int8(v, i);
+}
+
+static inline int16 broadcast(int16 v, uniform int i) {
+    return __broadcast_int16(v, i);
+}
+
 static inline int32 broadcast(int32 v, uniform int i) {
     return __broadcast_int32(v, i);
 }
@@ -99,6 +107,14 @@ static inline int64 broadcast(int64 v, uniform int i) {
 
 static inline float rotate(float v, uniform int i) {
     return __rotate_float(v, i);
+}
+
+static inline int8 rotate(int8 v, uniform int i) {
+    return __rotate_int8(v, i);
+}
+
+static inline int16 rotate(int16 v, uniform int i) {
+    return __rotate_int16(v, i);
 }
 
 static inline int32 rotate(int32 v, uniform int i) {
@@ -117,6 +133,14 @@ static inline float shuffle(float v, int i) {
     return __shuffle_float(v, i);
 }
 
+static inline int8 shuffle(int8 v, int i) {
+    return __shuffle_int8(v, i);
+}
+
+static inline int16 shuffle(int16 v, int i) {
+    return __shuffle_int16(v, i);
+}
+
 static inline int32 shuffle(int32 v, int i) {
     return __shuffle_int32(v, i);
 }
@@ -131,6 +155,14 @@ static inline int64 shuffle(int64 v, int i) {
 
 static inline float shuffle(float v0, float v1, int i) {
     return __shuffle2_float(v0, v1, i);
+}
+
+static inline int8 shuffle(int8 v0, int8 v1, int i) {
+    return __shuffle2_int8(v0, v1, i);
+}
+
+static inline int16 shuffle(int16 v0, int16 v1, int i) {
+    return __shuffle2_int16(v0, v1, i);
 }
 
 static inline int32 shuffle(int32 v0, int32 v1, int i) {
@@ -150,11 +182,27 @@ static inline uniform float extract(float x, uniform int i) {
     return floatbits(__extract_int32((int)intbits(x), i));
 }
 
-static inline uniform int extract(int x, uniform int i) {
+static inline uniform int8 extract(int8 x, uniform int i) {
+    return __extract_int8(x, i);
+}
+
+static inline uniform unsigned int8 extract(unsigned int8 x, uniform int i) {
+    return __extract_int8(x, (unsigned int)i);
+}
+
+static inline uniform int16 extract(int16 x, uniform int i) {
+    return __extract_int16(x, i);
+}
+
+static inline uniform unsigned int16 extract(unsigned int16 x, uniform int i) {
+    return __extract_int16(x, (unsigned int)i);
+}
+
+static inline uniform int32 extract(int32 x, uniform int i) {
     return __extract_int32(x, i);
 }
 
-static inline uniform unsigned int extract(unsigned int x, uniform int i) {
+static inline uniform unsigned int32 extract(unsigned int32 x, uniform int i) {
     return __extract_int32(x, (unsigned int)i);
 }
 
@@ -175,12 +223,30 @@ static inline float insert(float x, uniform int i, uniform float v) {
     return floatbits(__insert_int32((int)intbits(x), i, (int)intbits(v)));
 }
 
-static inline int insert(int x, uniform int i, uniform int v) {
+static inline int8 insert(int8 x, uniform int i, uniform int8 v) {
+    return __insert_int8(x, i, v);
+}
+
+static inline unsigned int8 insert(unsigned int8 x, uniform int i, 
+                                    uniform unsigned int8 v) {
+    return __insert_int8(x, (unsigned int)i, v);
+}
+
+static inline int16 insert(int16 x, uniform int i, uniform int16 v) {
+    return __insert_int16(x, i, v);
+}
+
+static inline unsigned int16 insert(unsigned int16 x, uniform int i, 
+                                    uniform unsigned int16 v) {
+    return __insert_int16(x, (unsigned int)i, v);
+}
+
+static inline int32 insert(int32 x, uniform int i, uniform int32 v) {
     return __insert_int32(x, i, v);
 }
 
-static inline unsigned int insert(unsigned int x, uniform int i, 
-                                  uniform unsigned int v) {
+static inline unsigned int32 insert(unsigned int32 x, uniform int i, 
+                                    uniform unsigned int32 v) {
     return __insert_int32(x, (unsigned int)i, v);
 }
 
@@ -218,7 +284,7 @@ static inline uniform bool all(bool v) {
     return __movmsk(match) == (1 << programCount) - 1;
 }
 
-static inline uniform int popcnt(uniform int v) {
+static inline uniform int32 popcnt(uniform int32 v) {
     return __popcnt_int32(v);
 }
 
@@ -248,6 +314,39 @@ static inline uniform int popcnt(bool v) {
 static inline uniform int lanemask() {
     return __movmsk(__mask);
 }
+
+///////////////////////////////////////////////////////////////////////////
+// Prefetching
+
+#define PREFETCHES(NAME, TYPE)                                  \
+static inline void prefetch_l1(const reference TYPE ptr) {      \
+    __prefetch_read_1_##NAME##_refsconst(ptr);                  \
+}                                                               \
+static inline void prefetch_l2(const reference TYPE ptr) {      \
+    __prefetch_read_2_##NAME##_refsconst(ptr);                  \
+}                                                               \
+static inline void prefetch_l3(const reference TYPE ptr) {      \
+    __prefetch_read_3_##NAME##_refsconst(ptr);                  \
+}                                                               \
+ static inline void prefetch_nt(const reference TYPE ptr) {     \
+     __prefetch_read_nt_##NAME##_refsconst(ptr);                \
+}
+
+PREFETCHES(uniform_int8, uniform int8)
+PREFETCHES(uniform_int16, uniform int16)
+PREFETCHES(uniform_int32, uniform int32)
+PREFETCHES(uniform_int64, uniform int64)
+PREFETCHES(uniform_float, uniform float)
+PREFETCHES(uniform_double, uniform double)
+
+PREFETCHES(varying_int8, int8)
+PREFETCHES(varying_int16, int16)
+PREFETCHES(varying_int32, int32)
+PREFETCHES(varying_int64, int64)
+PREFETCHES(varying_float, float)
+PREFETCHES(varying_double, double)
+
+#undef PREFETCHES
 
 ///////////////////////////////////////////////////////////////////////////
 // Horizontal ops / reductions
@@ -372,6 +471,78 @@ static inline uniform unsigned int64 reduce_max(unsigned int64 v) {
     return __reduce_max_uint64(__mask ? v : 0);
 }
 
+#define REDUCE_EQUAL(TYPE, FUNCTYPE)                               \
+static inline uniform bool reduce_equal(TYPE v) {                  \
+    uniform TYPE unusedValue;                                      \
+    return __reduce_equal_##FUNCTYPE(v, unusedValue, (int32)__mask); \
+}                                                                  \
+static inline uniform bool reduce_equal(TYPE v, reference uniform TYPE value) { \
+    return __reduce_equal_##FUNCTYPE(v, value, (int32)__mask);       \
+}
+
+REDUCE_EQUAL(int32, int32)
+REDUCE_EQUAL(unsigned int32, int32)
+REDUCE_EQUAL(float, float)
+REDUCE_EQUAL(int64, int64)
+REDUCE_EQUAL(unsigned int64, int64)
+REDUCE_EQUAL(double, double)
+
+static int32 exclusive_scan_add(int32 v) {
+    return __exclusive_scan_add_i32(v, (int32)__mask);
+}
+
+static unsigned int32 exclusive_scan_add(unsigned int32 v) {
+    return __exclusive_scan_add_i32(v, __mask);
+}
+
+static float exclusive_scan_add(float v) {
+    return __exclusive_scan_add_float(v, __mask);
+}
+
+static int64 exclusive_scan_add(int64 v) {
+    return __exclusive_scan_add_i64(v, (int32)__mask);
+}
+
+static unsigned int64 exclusive_scan_add(unsigned int64 v) {
+    return __exclusive_scan_add_i64(v, __mask);
+}
+
+static double exclusive_scan_add(double v) {
+    return __exclusive_scan_add_double(v, __mask);
+}
+
+static int32 exclusive_scan_and(int32 v) {
+    return __exclusive_scan_and_i32(v, (int32)__mask);
+}
+
+static unsigned int32 exclusive_scan_and(unsigned int32 v) {
+    return __exclusive_scan_and_i32(v, __mask);
+}
+
+static int64 exclusive_scan_and(int64 v) {
+    return __exclusive_scan_and_i64(v, (int32)__mask);
+}
+
+static unsigned int64 exclusive_scan_and(unsigned int64 v) {
+    return __exclusive_scan_and_i64(v, __mask);
+}
+
+static int32 exclusive_scan_or(int32 v) {
+    return __exclusive_scan_or_i32(v, (int32)__mask);
+}
+
+static unsigned int32 exclusive_scan_or(unsigned int32 v) {
+    return __exclusive_scan_or_i32(v, __mask);
+}
+
+static int64 exclusive_scan_or(int64 v) {
+    return __exclusive_scan_or_i64(v, (int32)__mask);
+}
+
+static unsigned int64 exclusive_scan_or(unsigned int64 v) {
+    return __exclusive_scan_or_i64(v, __mask);
+}
+
 ///////////////////////////////////////////////////////////////////////////
 // packed load, store
 
@@ -456,6 +627,8 @@ DEFINE_ATOMIC_OP(unsigned int64,int64,swap,swap)
 
 DEFINE_ATOMIC_OP(double,double,swap,swap)
 
+#undef DEFINE_ATOMIC_OP
+
 #define ATOMIC_DECL_CMPXCHG(TA, TB)                                        \
 static inline TA atomic_compare_exchange_global(                           \
          uniform reference TA ref, TA oldval, TA newval) {                 \
@@ -472,53 +645,10 @@ ATOMIC_DECL_CMPXCHG(int64, int64)
 ATOMIC_DECL_CMPXCHG(unsigned int64, int64)
 ATOMIC_DECL_CMPXCHG(double, double)
 
-///////////////////////////////////////////////////////////////////////////
-// Load/store from/to 8/16-bit types
-
-static inline int load_from_int8(uniform int a[], uniform int offset) {
-    return __load_int8(a, offset, __mask);
-}
-
-static inline unsigned int load_from_uint8(uniform unsigned int a[], 
-                                           uniform int offset) {
-    return __load_uint8(a, offset, __mask);
-}
-
-static inline void store_to_int8(uniform int a[], uniform int offset, 
-                                 unsigned int val) {
-    __store_int8(a, offset, val, __mask);
-}
-
-static inline void store_to_uint8(uniform unsigned int a[], uniform int offset, 
-                                  unsigned int val) {
-    // Can use __store_int8 for unsigned stuff, since it truncates bits in
-    // either case.
-    __store_int8(a, offset, val, __mask);
-}
-
-static inline int load_from_int16(uniform int a[], uniform int offset) {
-    return __load_int16(a, offset, __mask);
-}
-
-static inline unsigned int load_from_int16(uniform unsigned int a[], 
-                                           uniform int offset) {
-    return __load_uint16(a, offset, __mask);
-}
-
-static inline void store_to_int16(uniform int a[], uniform int offset, 
-                                  int val) {
-    __store_int16(a, offset, val, __mask);
-}
-
-static inline void store_to_uint16(uniform unsigned int a[], uniform int offset, 
-                                   unsigned int val) {
-    // Can use __store_int16 for unsigned stuff, since it truncates bits in
-    // either case.
-    __store_int16(a, offset, val, __mask);
-}
+#undef ATOMIC_DECL_CMPXCHG
 
 ///////////////////////////////////////////////////////////////////////////
-// Math
+// Floating-Point Math
 
 static inline float abs(float a) {
     // Floating-point hack: zeroing the high bit clears the sign
@@ -622,20 +752,17 @@ static inline uniform float rcp(uniform float v) {
     return __rcp_uniform_float(v);
 }
 
+///////////////////////////////////////////////////////////////////////////
+// min/max
+
+// float
+
 static inline float min(float a, float b) {
     return __min_varying_float(a, b);
 }
 
 static inline uniform float min(uniform float a, uniform float b) {
     return __min_uniform_float(a, b);
-}
-
-static inline double min(double a, double b) {
-    return __min_varying_double(a, b);
-}
-
-static inline uniform double min(uniform double a, uniform double b) {
-    return __min_uniform_double(a, b);
 }
 
 static inline float max(float a, float b) {
@@ -646,6 +773,17 @@ static inline uniform float max(uniform float a, uniform float b) {
     return __max_uniform_float(a, b);
 }
 
+
+// double
+
+static inline double min(double a, double b) {
+    return __min_varying_double(a, b);
+}
+
+static inline uniform double min(uniform double a, uniform double b) {
+    return __min_uniform_double(a, b);
+}
+
 static inline double max(double a, double b) {
     return __max_varying_double(a, b);
 }
@@ -653,6 +791,80 @@ static inline double max(double a, double b) {
 static inline uniform double max(uniform double a, uniform double b) {
     return __max_uniform_double(a, b);
 }
+
+// int8
+
+static inline uniform unsigned int8 min(uniform unsigned int8 a,
+                                        uniform unsigned int8 b) {
+    return (a < b) ? a : b;
+}
+
+static inline uniform unsigned int8 max(uniform unsigned int8 a, 
+                                        uniform unsigned int8 b) {
+    return (a > b) ? a : b;
+}
+
+static inline uniform int8 min(uniform int8 a, uniform int8 b) {
+    return (a < b) ? a : b;
+}
+
+static inline uniform int8 max(uniform int8 a, uniform int8 b) {
+    return (a > b) ? a : b;
+}
+
+static inline unsigned int8 min(unsigned int8 a, unsigned int8 b) {
+    return (a < b) ? a : b;
+}
+
+static inline unsigned int8 max(unsigned int8 a, unsigned int8 b) {
+    return (a > b) ? a : b;
+}
+
+static inline int8 min(int8 a, int8 b) {
+    return (a < b) ? a : b;
+}
+
+static inline int8 max(int8 a, int8 b) {
+    return (a > b) ? a : b;
+}
+
+// int16
+
+static inline uniform unsigned int16 min(uniform unsigned int16 a, 
+                                         uniform unsigned int16 b) {
+    return (a < b) ? a : b;
+}
+
+static inline uniform unsigned int16 max(uniform unsigned int16 a, 
+                                         uniform unsigned int16 b) {
+    return (a > b) ? a : b;
+}
+
+static inline uniform int16 min(uniform int16 a, uniform int16 b) {
+    return (a < b) ? a : b;
+}
+
+static inline uniform int16 max(uniform int16 a, uniform int16 b) {
+    return (a > b) ? a : b;
+}
+
+static inline unsigned int16 min(unsigned int16 a, unsigned int16 b) {
+    return (a < b) ? a : b;
+}
+
+static inline unsigned int16 max(unsigned int16 a, unsigned int16 b) {
+    return (a > b) ? a : b;
+}
+
+static inline int16 min(int16 a, int16 b) {
+    return (a < b) ? a : b;
+}
+
+static inline int16 max(int16 a, int16 b) {
+    return (a > b) ? a : b;
+}
+
+// int32
 
 static inline unsigned int min(unsigned int a, unsigned int b) {
     return __min_varying_uint32(a, b);
@@ -686,6 +898,8 @@ static inline uniform int max(uniform int a, uniform int b) {
     return __max_uniform_int32(a, b);
 }
 
+// int64
+
 static inline unsigned int64 min(unsigned int64 a, unsigned int64 b) {
     return __min_varying_uint64(a, b);
 }
@@ -718,6 +932,11 @@ static inline uniform int64 max(uniform int64 a, uniform int64 b) {
     return __max_uniform_int64(a, b);
 }
 
+///////////////////////////////////////////////////////////////////////////
+// clamps
+
+// float
+
 static inline float clamp(float v, float low, float high) {
     return min(max(v, low), high);
 }
@@ -726,21 +945,58 @@ static inline uniform float clamp(uniform float v, uniform float low, uniform fl
     return min(max(v, low), high);
 }
 
+// int8
+
+static inline unsigned int8 clamp(unsigned int8 v, unsigned int8 low, 
+                                   unsigned int8 high) {
+    return min(max(v, low), high);
+}
+
+static inline uniform unsigned int8 clamp(uniform unsigned int8 v, 
+                                           uniform unsigned int8 low, 
+                                           uniform unsigned int8 high) {
+    return min(max(v, low), high);
+}
+
+static inline int8 clamp(int8 v, int8 low, int8 high) {
+    return min(max(v, low), high);
+}
+
+static inline uniform int8 clamp(uniform int8 v, uniform int8 low, 
+                                  uniform int8 high) {
+    return min(max(v, low), high);
+}
+
+// int16
+
+static inline unsigned int16 clamp(unsigned int16 v, unsigned int16 low, 
+                                   unsigned int16 high) {
+    return min(max(v, low), high);
+}
+
+static inline uniform unsigned int16 clamp(uniform unsigned int16 v, 
+                                           uniform unsigned int16 low, 
+                                           uniform unsigned int16 high) {
+    return min(max(v, low), high);
+}
+
+static inline int16 clamp(int16 v, int16 low, int16 high) {
+    return min(max(v, low), high);
+}
+
+static inline uniform int16 clamp(uniform int16 v, uniform int16 low, 
+                                  uniform int16 high) {
+    return min(max(v, low), high);
+}
+
+// int32
+
 static inline unsigned int clamp(unsigned int v, unsigned int low, unsigned int high) {
     return min(max(v, low), high);
 }
 
 static inline uniform unsigned int clamp(uniform unsigned int v, uniform unsigned int low, 
                                          uniform unsigned int high) {
-    return min(max(v, low), high);
-}
-
-static inline unsigned int64 clamp(unsigned int64 v, unsigned int64 low, unsigned int64 high) {
-    return min(max(v, low), high);
-}
-
-static inline uniform unsigned int64 clamp(uniform unsigned int64 v, uniform unsigned int64 low, 
-                                           uniform unsigned int64 high) {
     return min(max(v, low), high);
 }
 
@@ -752,11 +1008,25 @@ static inline uniform int clamp(uniform int v, uniform int low, uniform int high
     return min(max(v, low), high);
 }
 
+// int64
+
+static inline unsigned int64 clamp(unsigned int64 v, unsigned int64 low, 
+                                   unsigned int64 high) {
+    return min(max(v, low), high);
+}
+
+static inline uniform unsigned int64 clamp(uniform unsigned int64 v, 
+                                           uniform unsigned int64 low, 
+                                           uniform unsigned int64 high) {
+    return min(max(v, low), high);
+}
+
 static inline int64 clamp(int64 v, int64 low, int64 high) {
     return min(max(v, low), high);
 }
 
-static inline uniform int64 clamp(uniform int64 v, uniform int64 low, uniform int64 high) {
+static inline uniform int64 clamp(uniform int64 v, uniform int64 low, 
+                                  uniform int64 high) {
     return min(max(v, low), high);
 }
 
@@ -2190,6 +2460,330 @@ static inline uniform double pow(uniform double a, uniform double b) {
 }
 
 ///////////////////////////////////////////////////////////////////////////
+// half-precision floats
+
+static inline uniform float half_to_float(uniform unsigned int16 h) {
+    if ((h & 0x7FFFu) == 0) 
+        // Signed zero
+        return floatbits(((unsigned int32) h) << 16);
+    else {
+        // Though these are int16 quantities, we get much better code 
+        // with them stored as int32s...
+        uniform unsigned int32 hs = h & (int32)0x8000u;  // Pick off sign bit
+        uniform unsigned int32 he = h & (int32)0x7C00u;  // Pick off exponent bits
+        uniform unsigned int32 hm = h & (int32)0x03FFu;  // Pick off mantissa bits
+        if (he == 0) {  
+            // Denormal will convert to normalized
+            uniform int e = -1;
+            // The following loop figures out how much extra to adjust the exponent
+            // Shift until leading bit overflows into exponent bit
+            do {
+                e++;
+                hm <<= 1;
+            } while((hm & 0x0400u) == 0);
+
+            // Sign bit
+            uniform unsigned int32 xs = ((unsigned int32) hs) << 16; 
+            // Exponent: unbias the halfp, then bias the single
+            uniform int32 xes = ((int32)(he >> 10)) - 15 + 127 - e;
+            // Exponent
+            uniform unsigned int32 xe = (unsigned int32) (xes << 23); 
+            // Mantissa
+            uniform unsigned int32 xm = ((unsigned int32) (hm & 0x03FFu)) << 13; 
+            return floatbits(xs | xe | xm);
+        } 
+        else {
+            if (he == 0x7C00u) {  
+                // Inf or NaN (all the exponent bits are set)
+                if (hm == 0)
+                    // Zero mantissa -> signed inf
+                    return floatbits((((unsigned int32) hs) << 16) | 
+                                     ((unsigned int32) 0x7F800000u));
+                else
+                    // NaN
+                    return floatbits(0xFFC00000u);
+            }
+            else { 
+                // Normalized number
+                // sign
+                uniform unsigned int32 xs = ((unsigned int32) hs) << 16; 
+                // Exponent: unbias the halfp, then bias the single
+                uniform int32 xes = ((int32) (he >> 10)) - 15 + 127; 
+                // Exponent
+                uniform unsigned int32 xe = (unsigned int32) (xes << 23);
+                // Mantissa
+                uniform unsigned int32 xm = ((unsigned int32) hm) << 13; 
+                return floatbits(xs | xe | xm);
+            }
+        }
+    }
+}
+
+static inline float half_to_float(unsigned int16 h) {
+    if ((h & 0x7FFFu) == 0) 
+        // Signed zero
+        return floatbits(((unsigned int32) h) << 16);
+    else {
+        // Though these are int16 quantities, we get much better code 
+        // with them stored as int32s...
+        unsigned int32 hs = h & (int32)0x8000u;  // Pick off sign bit
+        unsigned int32 he = h & (int32)0x7C00u;  // Pick off exponent bits
+        unsigned int32 hm = h & (int32)0x03FFu;  // Pick off mantissa bits
+        cif (he == 0) {  
+            // Denormal will convert to normalized
+            int e = -1;
+            // The following loop figures out how much extra to adjust the exponent
+            // Shift until leading bit overflows into exponent bit
+            do {
+                e++;
+                hm <<= 1;
+            } while((hm & 0x0400u) == 0);
+
+            // Sign bit
+            unsigned int32 xs = ((unsigned int32) hs) << 16; 
+            // Exponent: unbias the halfp, then bias the single
+            int32 xes = ((int32)(he >> 10)) - 15 + 127 - e;
+            // Exponent
+            unsigned int32 xe = (unsigned int32) (xes << 23); 
+            // Mantissa
+            unsigned int32 xm = ((unsigned int32) (hm & 0x03FFu)) << 13; 
+            return floatbits(xs | xe | xm);
+        } 
+        else {
+            if (he == 0x7C00u) {  
+                // Inf or NaN (all the exponent bits are set)
+                if (hm == 0)
+                    // Zero mantissa -> signed inf
+                    return floatbits((((unsigned int32) hs) << 16) | 
+                                     ((unsigned int32) 0x7F800000u));
+                else
+                    // NaN
+                    return floatbits(0xFFC00000u);
+            }
+            else { 
+                // Normalized number
+                // sign
+                unsigned int32 xs = ((unsigned int32) hs) << 16; 
+                // Exponent: unbias the halfp, then bias the single
+                int32 xes = ((int32) (he >> 10)) - 15 + 127; 
+                // Exponent
+                unsigned int32 xe = (unsigned int32) (xes << 23);
+                // Mantissa
+                unsigned int32 xm = ((unsigned int32) hm) << 13; 
+                return floatbits(xs | xe | xm);
+            }
+        }
+    }
+}
+
+
+static inline uniform int16 float_to_half(uniform float f) {
+    uniform int32 x = intbits(f);
+    // Store the return value in an int32 until the very end; this ends up
+    // generating better code...
+    uniform int32 ret;
+    if ((x & 0x7FFFFFFFu) == 0)
+        // Signed zero
+        ret = (x >> 16); 
+    else {
+        uniform unsigned int32 xs = x & 0x80000000u;  // Pick off sign bit
+        uniform unsigned int32 xe = x & 0x7F800000u;  // Pick off exponent bits
+        uniform unsigned int32 xm = x & 0x007FFFFFu;  // Pick off mantissa bits
+        if (xe == 0) {  
+            // Denormal will underflow, return a signed zero
+            ret = (xs >> 16);
+        } 
+        else {
+            if (xe == 0x7F800000u) {  
+                // Inf or NaN (all the exponent bits are set)
+                if (xm == 0)
+                    // Zero mantissa -> signed infinity
+                    ret = ((xs >> 16) | 0x7C00u);
+                else
+                    // NaN, only 1st mantissa bit set
+                    ret = 0xFE00u;
+            }
+            else { 
+                // Normalized number
+                uniform unsigned int32 hs = (xs >> 16); // Sign bit
+                uniform unsigned int32 hm;
+                // Exponent unbias the single, then bias the halfp
+                uniform int32 hes = ((int)(xe >> 23)) - 127 + 15; 
+                if (hes >= 0x1F)  
+                    // Overflow: return signed infinity
+                    ret = ((xs >> 16) | 0x7C00u);
+                else if (hes <= 0) {
+                    // Underflow
+                    if ((14 - hes) > 24) {  
+                        // Mantissa shifted all the way off & no rounding possibility
+                        hm = 0u;  // Set mantissa to zero
+                    } 
+                    else {
+                        xm |= 0x00800000u;  // Add the hidden leading bit
+                        hm = (xm >> (14 - hes)); // Mantissa
+                        if ((xm >> (13 - hes)) & 0x00000001u) // Check for rounding
+                            // Round, might overflow into exp bit, but this is OK
+                            hm += 1u; 
+                    }
+                    ret = (hs | hm);
+                } 
+                else {
+                    uniform unsigned int32 he = (hes << 10); // Exponent
+                    hm = (xm >> 13); // Mantissa
+                    if (xm & 0x00001000u) // Check for rounding
+                        // Round, might overflow to inf, this is OK
+                        ret = (hs | he | hm) + 1u; 
+                    else
+                        ret = (hs | he | hm);
+                }
+            }
+        }
+    }
+    return (int16)ret;
+}
+
+
+static inline int16 float_to_half(float f) {
+    int32 x = intbits(f);
+    // Store the return value in an int32 until the very end; this ends up
+    // generating better code...
+    int32 ret;
+    if ((x & 0x7FFFFFFFu) == 0)
+        // Signed zero
+        ret = (x >> 16); 
+    else {
+        unsigned int32 xs = x & 0x80000000u;  // Pick off sign bit
+        unsigned int32 xe = x & 0x7F800000u;  // Pick off exponent bits
+        unsigned int32 xm = x & 0x007FFFFFu;  // Pick off mantissa bits
+        if (xe == 0) {  
+            // Denormal will underflow, return a signed zero
+            ret = (xs >> 16);
+        } 
+        else {
+            cif (xe == 0x7F800000u) {  
+                // Inf or NaN (all the exponent bits are set)
+                if (xm == 0)
+                    // Zero mantissa -> signed infinity
+                    ret = ((xs >> 16) | 0x7C00u);
+                else
+                    // NaN, only 1st mantissa bit set
+                    ret = 0xFE00u;
+            }
+            else { 
+                // Normalized number
+                unsigned int32 hs = (xs >> 16); // Sign bit
+                unsigned int32 hm;
+                // Exponent unbias the single, then bias the halfp
+                int32 hes = ((int)(xe >> 23)) - 127 + 15; 
+                if (hes >= 0x1F)  
+                    // Overflow: return signed infinity
+                    ret = ((xs >> 16) | 0x7C00u);
+                else if (hes <= 0) {
+                    // Underflow
+                    if ((14 - hes) > 24) {  
+                        // Mantissa shifted all the way off & no rounding possibility
+                        hm = 0u;  // Set mantissa to zero
+                    } 
+                    else {
+                        xm |= 0x00800000u;  // Add the hidden leading bit
+                        hm = (xm >> (14 - hes)); // Mantissa
+                        if ((xm >> (13 - hes)) & 0x00000001u) // Check for rounding
+                            // Round, might overflow into exp bit, but this is OK
+                            hm += 1u; 
+                    }
+                    ret = (hs | hm);
+                } 
+                else {
+                    unsigned int32 he = (hes << 10); // Exponent
+                    hm = (xm >> 13); // Mantissa
+                    if (xm & 0x00001000u) // Check for rounding
+                        // Round, might overflow to inf, this is OK
+                        ret = (hs | he | hm) + 1u; 
+                    else
+                        ret = (hs | he | hm);
+                }
+            }
+        }
+    }
+    return (int16)ret;
+}
+
+
+static inline uniform float half_to_float_fast(uniform unsigned int16 h) {
+    uniform unsigned int32 hs = h & (int32)0x8000u;  // Pick off sign bit
+    uniform unsigned int32 he = h & (int32)0x7C00u;  // Pick off exponent bits
+    uniform unsigned int32 hm = h & (int32)0x03FFu;  // Pick off mantissa bits
+
+    // sign
+    uniform unsigned int32 xs = ((unsigned int32) hs) << 16; 
+    // Exponent: unbias the halfp, then bias the single
+    uniform int32 xes = ((int32) (he >> 10)) - 15 + 127; 
+    // Exponent
+    uniform unsigned int32 xe = (unsigned int32) (xes << 23);
+    // Mantissa
+    uniform unsigned int32 xm = ((unsigned int32) hm) << 13; 
+    return floatbits(xs | xe | xm);
+
+}
+
+static inline float half_to_float_fast(unsigned int16 h) {
+    unsigned int32 hs = h & (int32)0x8000u;  // Pick off sign bit
+    unsigned int32 he = h & (int32)0x7C00u;  // Pick off exponent bits
+    unsigned int32 hm = h & (int32)0x03FFu;  // Pick off mantissa bits
+
+    // sign
+    unsigned int32 xs = ((unsigned int32) hs) << 16; 
+    // Exponent: unbias the halfp, then bias the single
+    int32 xes = ((int32) (he >> 10)) - 15 + 127; 
+    // Exponent
+    unsigned int32 xe = (unsigned int32) (xes << 23);
+    // Mantissa
+    unsigned int32 xm = ((unsigned int32) hm) << 13; 
+    return floatbits(xs | xe | xm);
+
+}
+
+static inline uniform int16 float_to_half_fast(uniform float f) {
+    uniform int32 x = intbits(f);
+    uniform unsigned int32 xs = x & 0x80000000u;  // Pick off sign bit
+    uniform unsigned int32 xe = x & 0x7F800000u;  // Pick off exponent bits
+    uniform unsigned int32 xm = x & 0x007FFFFFu;  // Pick off mantissa bits
+
+    uniform unsigned int32 hs = (xs >> 16); // Sign bit
+    // Exponent unbias the single, then bias the halfp
+    uniform int32 hes = ((int)(xe >> 23)) - 127 + 15; 
+    uniform unsigned int32 he = (hes << 10); // Exponent
+    uniform int32 hm = (xm >> 13); // Mantissa
+    uniform int32 ret = (hs | he | hm);
+
+    if (xm & 0x00001000u) // Check for rounding
+        // Round, might overflow to inf, this is OK
+        ret += 1u; 
+
+    return (int16)ret;
+}
+
+static inline int16 float_to_half_fast(float f) {
+    int32 x = intbits(f);
+    unsigned int32 xs = x & 0x80000000u;  // Pick off sign bit
+    unsigned int32 xe = x & 0x7F800000u;  // Pick off exponent bits
+    unsigned int32 xm = x & 0x007FFFFFu;  // Pick off mantissa bits
+
+    unsigned int32 hs = (xs >> 16); // Sign bit
+    // Exponent unbias the single, then bias the halfp
+    int32 hes = ((int)(xe >> 23)) - 127 + 15; 
+    unsigned int32 he = (hes << 10); // Exponent
+    int32 hm = (xm >> 13); // Mantissa
+    int32 ret = (hs | he | hm);
+
+    if (xm & 0x00001000u) // Check for rounding
+        // Round, might overflow to inf, this is OK
+        ret += 1u; 
+
+    return (int16)ret;
+}
+
+///////////////////////////////////////////////////////////////////////////
 // RNG stuff
 
 struct RNGState {
@@ -2213,7 +2807,9 @@ static inline unsigned int random(reference RNGState state)
 
 static inline float frandom(reference RNGState state)
 {
-    return ((int)(random(state) & ((1<<24)-1))) / (float)(1 << 24);
+    unsigned int irand = random(state);
+    irand &= (1<<23)-1;
+    return floatbits(0x3F800000 | irand)-1.0f;
 }
 
 static inline uniform unsigned int __seed4(reference RNGState state, 

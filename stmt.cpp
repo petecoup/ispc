@@ -306,17 +306,19 @@ DeclStmt::EmitCode(FunctionEmitContext *ctx) const {
                                          llvm::Twine("static.") +
                                          llvm::Twine(sym->pos.first_line) + 
                                          llvm::Twine(".") + sym->name.c_str());
+            // Tell the FunctionEmitContext about the variable 
+            ctx->EmitVariableDebugInfo(sym);
         }
         else {
             // For non-static variables, allocate storage on the stack
             sym->storagePtr = ctx->AllocaInst(llvmType, sym->name.c_str());
+            // Tell the FunctionEmitContext about the variable; must do
+            // this before the initializer stuff.
+            ctx->EmitVariableDebugInfo(sym);
             // And then get it initialized...
             lInitSymbol(sym->storagePtr, sym->name.c_str(), type, decl->initExpr,
                         ctx, sym->pos);
         }
-
-        // Finally, tell the FunctionEmitContext about the variable 
-        ctx->EmitVariableDebugInfo(sym);
     }
 }
 
@@ -1405,6 +1407,18 @@ lProcessPrintArg(Expr *expr, FunctionEmitContext *ctx, std::string &argTypes) {
             return NULL;
     }
 
+    // Just int8 and int16 types to int32s...
+    const Type *baseType = type->GetAsNonConstType()->GetAsUniformType();
+    if (baseType == AtomicType::UniformInt8 ||
+        baseType == AtomicType::UniformUInt8 ||
+        baseType == AtomicType::UniformInt16 ||
+        baseType == AtomicType::UniformUInt16) {
+        expr = new TypeCastExpr(type->IsUniformType() ? AtomicType::UniformInt32 :
+                                                        AtomicType::VaryingInt32, 
+                                expr, expr->pos);
+        type = expr->GetType();
+    }
+        
     char t = lEncodeType(type->GetAsNonConstType());
     if (t == '\0') {
         Error(expr->pos, "Only atomic types are allowed in print statements; "
@@ -1428,7 +1442,7 @@ lProcessPrintArg(Expr *expr, FunctionEmitContext *ctx, std::string &argTypes) {
 
 
 /* PrintStmt works closely with the __do_print() function implemented in
-   the stdlib-c.c file.  In particular, the EmitCode() method here needs to
+   the builtins-c.c file.  In particular, the EmitCode() method here needs to
    take the arguments passed to it from ispc and generate a valid call to
    __do_print() with the information that __do_print() then needs to do the
    actual printing work at runtime.
@@ -1450,8 +1464,11 @@ PrintStmt::EmitCode(FunctionEmitContext *ctx) const {
     llvm::Value *args[5];
     std::string argTypes;
 
-    if (values == NULL)
-        args[4] = NULL;
+    if (values == NULL) {
+        LLVM_TYPE_CONST llvm::Type *ptrPtrType = 
+            llvm::PointerType::get(LLVMTypes::VoidPointerType, 0);
+        args[4] = llvm::Constant::getNullValue(ptrPtrType);
+    }
     else {
         // Get the values passed to the print() statement evaluated and
         // stored in memory so that we set up the array of pointers to them
